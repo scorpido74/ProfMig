@@ -28,4 +28,11 @@ Professional Windows Profile Migration Toolkit
 
 ## License
 
-MIT
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## Maintainers
+
+ProfMig is maintained by:
+
+- Remco de Kievit ([@scorpido74](https://github.com/scorpido74))
+- baseman-dev
