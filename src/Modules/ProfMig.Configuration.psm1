@@ -1,4 +1,3 @@
-Author      : Remco de Kievit
 #>
 
 Set-StrictMode -Version Latest
