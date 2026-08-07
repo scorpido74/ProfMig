@@ -35,4 +35,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ProfMig is maintained by:
 
 - Remco de Kievit ([@scorpido74](https://github.com/scorpido74))
-- baseman-dev
+- Bas van Ek (@baseman-devbaseman-dev)
