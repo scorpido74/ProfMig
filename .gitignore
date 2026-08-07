@@ -1,0 +1,24 @@
+# VS Code
+.vscode/
+
+# Logs
+logs/
+reports/
+backup/
+
+# PowerShell
+*.ps1xml
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Temp
+*.tmp
+*.bak
+
+# Zip releases
+*.zip
+
+# Pester
+TestResults/
