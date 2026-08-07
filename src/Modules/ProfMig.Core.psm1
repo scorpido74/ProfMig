@@ -18,13 +18,18 @@ Set-StrictMode -Version Latest
 function Initialize-ProfMig {
 
     [CmdletBinding()]
-    param()
+    param(
+
+[Parameter(Mandatory)]
+
+$Configuration
+)
 
     $Script:ProfMig = [PSCustomObject]@{
 
-        Name       = 'ProfMig'
-        Version    = '0.1.0-alpha'
-        Build      = '2026.08.07'
+        Name       = $Configuration.Application.Name
+        Version    = $Configuration.Application.Version
+        Build      = $Configuration.Application.Build
 
         StartTime  = Get-Date
 

@@ -1,0 +1,32 @@
+Author      : Remco de Kievit
+#>
+
+Set-StrictMode -Version Latest
+
+$script:Config = $null
+
+function Import-ProfMigConfiguration {
+
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)]
+    [string]$Path
+)
+
+if (-not (Test-Path $Path)) {
+
+    throw "Configuration file not found: $Path"
+
+}
+
+$script:Config = Import-PowerShellDataFile -Path $Path
+
+return $script:Config
+}
+
+function Get-ProfMigConfiguration {
+
+return $script:Config
+}
+
+Export-ModuleMember -Function *
