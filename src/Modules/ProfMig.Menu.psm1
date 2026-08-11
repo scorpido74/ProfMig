@@ -5,7 +5,8 @@ Description : Interactive menu framework for ProfMig.
 The menu consumes structured objects from the ProfMig Inventory Engine
 and configuration data from the ProfMig Configuration Engine.
 
-Profile discovery remains independent from menu formatting.
+Profile discovery and copy operations remain independent from
+menu formatting and user interaction.
 #>
 
 Set-StrictMode -Version Latest
@@ -153,6 +154,69 @@ function Show-ProfMigConfiguration {
 }
 
 
+function Show-ProfMigMigrationResult {
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Result
+    )
+
+    Write-Host ''
+    Write-Host 'Migration result' -ForegroundColor Cyan
+    Write-Host '================' -ForegroundColor Cyan
+    Write-Host ''
+
+    if ($Result.Status -eq 'Success') {
+        Write-Host "Status         : $($Result.Status)" -ForegroundColor Green
+    }
+    else {
+        Write-Host "Status         : $($Result.Status)" -ForegroundColor Yellow
+    }
+
+    Write-Host "Started        : $($Result.StartedAt)"
+    Write-Host "Completed      : $($Result.CompletedAt)"
+    Write-Host "Duration       : $($Result.Duration)"
+    Write-Host ''
+
+    Write-Host 'Totals' -ForegroundColor Cyan
+    Write-Host "Files selected : $($Result.Totals.FilesSelected)"
+    Write-Host "Files copied   : $($Result.Totals.FilesCopied)"
+    Write-Host "Files skipped  : $($Result.Totals.FilesSkipped)"
+    Write-Host "Files excluded : $($Result.Totals.FilesExcluded)"
+    Write-Host "Files failed   : $($Result.Totals.FilesFailed)"
+    Write-Host "Bytes copied   : $($Result.Totals.BytesCopied)"
+    Write-Host ''
+
+    Write-Host 'Components' -ForegroundColor Cyan
+
+    foreach ($component in $Result.Components) {
+
+        Write-Host (
+            '{0,-15} Selected: {1,-6} Copied: {2,-6} Skipped: {3,-6} Excluded: {4,-6} Failed: {5,-6} {6}' -f
+            $component.Component,
+            $component.FilesSelected,
+            $component.FilesCopied,
+            $component.FilesSkipped,
+            $component.FilesExcluded,
+            $component.FilesFailed,
+            $component.Status
+        )
+    }
+
+    if ($Result.Errors.Count -gt 0) {
+
+        Write-Host ''
+        Write-Host 'Errors' -ForegroundColor Yellow
+
+        foreach ($migrationError in $Result.Errors) {
+            Write-Host " - [$($migrationError.Component)] $($migrationError.Error)" `
+                -ForegroundColor Yellow
+        }
+    }
+}
+
+
 function Start-ProfMigMenu {
 
     [CmdletBinding()]
@@ -243,8 +307,10 @@ function Start-ProfMigMenu {
 
                 Write-Host ''
 
-                if ($null -eq $sourceProfile -or
-                    $null -eq $destinationProfile) {
+                if (
+                    $null -eq $sourceProfile -or
+                    $null -eq $destinationProfile
+                ) {
 
                     Write-Host 'Migration cannot start.' `
                         -ForegroundColor Yellow
@@ -267,17 +333,71 @@ function Start-ProfMigMenu {
                 }
                 else {
 
-                    Write-Host 'Source profile      :' `
-                        $sourceProfile.ProfileName
-
-                    Write-Host 'Destination profile :' `
-                        $destinationProfile.ProfileName
-
+                    Write-Host "Source profile      : $($sourceProfile.ProfileName)"
+                    Write-Host "Destination profile : $($destinationProfile.ProfileName)"
                     Write-Host ''
-                    Write-Host 'Copy Engine is not available yet.' `
+
+                    Write-Host 'The following folders will be migrated:' `
+                        -ForegroundColor Cyan
+
+                    Write-Host ' - Desktop'
+                    Write-Host ' - Documents'
+                    Write-Host ' - Downloads'
+                    Write-Host ' - Pictures'
+                    Write-Host ''
+
+                    Write-Host 'Existing destination files will NOT be overwritten.' `
                         -ForegroundColor Yellow
 
-                    Write-Host 'Migration has not been started.'
+                    Write-Host ''
+
+                    $confirmation = Read-Host 'Start migration? (Y/N)'
+
+                    if ($confirmation -match '^[Yy]$') {
+
+                        $copyConfiguration = @{
+                            Folders = @(
+                                'Desktop'
+                                'Documents'
+                                'Downloads'
+                                'Pictures'
+                            )
+
+                            AdditionalFolders = @()
+
+                            Exclusions = @(
+                                '*.tmp'
+                                '*.log'
+                                'Thumbs.db'
+                            )
+                        }
+
+                        Write-Host ''
+                        Write-Host 'Migration started...' -ForegroundColor Cyan
+                        Write-Host ''
+
+                        try {
+
+                            $migrationResult = Invoke-ProfMigCopy `
+                                -SourceProfile $sourceProfile.ProfilePath `
+                                -DestinationProfile $destinationProfile.ProfilePath `
+                                -Configuration $copyConfiguration
+
+                            Show-ProfMigMigrationResult `
+                                -Result $migrationResult
+                        }
+                        catch {
+
+                            Write-Host ''
+                            Write-Host 'Migration failed.' -ForegroundColor Red
+                            Write-Host $_.Exception.Message -ForegroundColor Red
+                        }
+                    }
+                    else {
+
+                        Write-Host ''
+                        Write-Host 'Migration cancelled.' -ForegroundColor Yellow
+                    }
                 }
 
                 Write-Host ''
@@ -316,4 +436,5 @@ Export-ModuleMember -Function `
     Show-Header,
     Select-User,
     Show-ProfMigConfiguration,
+    Show-ProfMigMigrationResult,
     Start-ProfMigMenu
