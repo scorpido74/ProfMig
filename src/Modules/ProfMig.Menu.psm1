@@ -1,9 +1,11 @@
 <#
 Module      : ProfMig.Menu
-Description : Interactive menu functions for ProfMig.
+Description : Interactive menu framework for ProfMig.
 
-The menu consumes structured objects from the ProfMig inventory engine.
-Inventory discovery itself remains independent from menu formatting.
+The menu consumes structured objects from the ProfMig Inventory Engine
+and configuration data from the ProfMig Configuration Engine.
+
+Profile discovery remains independent from menu formatting.
 #>
 
 Set-StrictMode -Version Latest
@@ -14,18 +16,38 @@ function Show-Header {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        $Configuration
+        $Configuration,
+
+        $SourceProfile = $null,
+
+        $DestinationProfile = $null
     )
 
     Clear-Host
 
     Write-Host ''
     Write-Host '==============================================' -ForegroundColor Cyan
-    Write-Host '        Profile Migration Tool' -ForegroundColor White
+    Write-Host '                    ProfMig' -ForegroundColor White
     Write-Host '==============================================' -ForegroundColor Cyan
     Write-Host ''
     Write-Host "Version : $($Configuration.Application.Version)"
     Write-Host "Build   : $($Configuration.Application.Build)"
+    Write-Host ''
+
+    if ($null -eq $SourceProfile) {
+        Write-Host 'Source profile      : Not selected' -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Source profile      : $($SourceProfile.ProfileName)" -ForegroundColor Green
+    }
+
+    if ($null -eq $DestinationProfile) {
+        Write-Host 'Destination profile : Not selected' -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "Destination profile : $($DestinationProfile.ProfileName)" -ForegroundColor Green
+    }
+
     Write-Host ''
 }
 
@@ -94,4 +116,204 @@ function Select-User {
 }
 
 
-Export-ModuleMember -Function Show-Header, Select-User
+function Show-ProfMigConfiguration {
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Configuration
+    )
+
+    Clear-Host
+
+    Write-Host ''
+    Write-Host 'ProfMig - Configuration' -ForegroundColor Cyan
+    Write-Host '=======================' -ForegroundColor Cyan
+    Write-Host ''
+
+    Write-Host "Application : $($Configuration.Application.Name)"
+    Write-Host "Version     : $($Configuration.Application.Version)"
+    Write-Host "Build       : $($Configuration.Application.Build)"
+    Write-Host ''
+
+    Write-Host 'Paths' -ForegroundColor Cyan
+    Write-Host "Logs        : $($Configuration.Paths.Logs)"
+    Write-Host "Reports     : $($Configuration.Paths.Reports)"
+    Write-Host "Backup      : $($Configuration.Paths.Backup)"
+    Write-Host ''
+
+    Write-Host 'Excluded profiles' -ForegroundColor Cyan
+
+    foreach ($profile in $Configuration.ExcludedProfiles) {
+        Write-Host " - $profile"
+    }
+
+    Write-Host ''
+    Read-Host 'Press Enter to return to the main menu' | Out-Null
+}
+
+
+function Start-ProfMigMenu {
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $Configuration,
+
+        [Parameter(Mandatory)]
+        [array]$Profiles
+    )
+
+    $sourceProfile = $null
+    $destinationProfile = $null
+    $running = $true
+
+    while ($running) {
+
+        Show-Header `
+            -Configuration $Configuration `
+            -SourceProfile $sourceProfile `
+            -DestinationProfile $destinationProfile
+
+        Write-Host '1. Select source profile'
+        Write-Host '2. Select destination profile'
+        Write-Host '3. Show migration configuration'
+        Write-Host '4. Start migration'
+        Write-Host '5. Exit'
+        Write-Host ''
+
+        $selection = Read-Host 'Select an option'
+
+        switch ($selection) {
+
+            '1' {
+
+                $sourceProfile = Select-User `
+                    -Users $Profiles `
+                    -Title 'Select source profile'
+
+                if (
+                    $null -ne $destinationProfile -and
+                    $sourceProfile.ProfilePath -eq $destinationProfile.ProfilePath
+                ) {
+
+                    Write-Host ''
+                    Write-Host 'Source and destination profile cannot be the same.' `
+                        -ForegroundColor Red
+
+                    $sourceProfile = $null
+
+                    Write-Host ''
+                    Read-Host 'Press Enter to return to the main menu' | Out-Null
+                }
+            }
+
+
+            '2' {
+
+                $destinationProfile = Select-User `
+                    -Users $Profiles `
+                    -Title 'Select destination profile'
+
+                if (
+                    $null -ne $sourceProfile -and
+                    $destinationProfile.ProfilePath -eq $sourceProfile.ProfilePath
+                ) {
+
+                    Write-Host ''
+                    Write-Host 'Source and destination profile cannot be the same.' `
+                        -ForegroundColor Red
+
+                    $destinationProfile = $null
+
+                    Write-Host ''
+                    Read-Host 'Press Enter to return to the main menu' | Out-Null
+                }
+            }
+
+
+            '3' {
+
+                Show-ProfMigConfiguration `
+                    -Configuration $Configuration
+            }
+
+
+            '4' {
+
+                Write-Host ''
+
+                if ($null -eq $sourceProfile -or
+                    $null -eq $destinationProfile) {
+
+                    Write-Host 'Migration cannot start.' `
+                        -ForegroundColor Yellow
+
+                    Write-Host 'A valid source and destination profile must be selected.'
+                }
+                elseif (-not $sourceProfile.Accessible) {
+
+                    Write-Host 'Migration cannot start.' `
+                        -ForegroundColor Yellow
+
+                    Write-Host 'The selected source profile is not accessible.'
+                }
+                elseif (-not $destinationProfile.Accessible) {
+
+                    Write-Host 'Migration cannot start.' `
+                        -ForegroundColor Yellow
+
+                    Write-Host 'The selected destination profile is not accessible.'
+                }
+                else {
+
+                    Write-Host 'Source profile      :' `
+                        $sourceProfile.ProfileName
+
+                    Write-Host 'Destination profile :' `
+                        $destinationProfile.ProfileName
+
+                    Write-Host ''
+                    Write-Host 'Copy Engine is not available yet.' `
+                        -ForegroundColor Yellow
+
+                    Write-Host 'Migration has not been started.'
+                }
+
+                Write-Host ''
+                Read-Host 'Press Enter to return to the main menu' | Out-Null
+            }
+
+
+            '5' {
+
+                Write-Host ''
+                Write-Host 'Exiting ProfMig...'
+
+                $running = $false
+            }
+
+
+            default {
+
+                Write-Host ''
+                Write-Host 'Invalid selection. Choose option 1 through 5.' `
+                    -ForegroundColor Red
+
+                Start-Sleep -Seconds 2
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        SourceProfile      = $sourceProfile
+        DestinationProfile = $destinationProfile
+    }
+}
+
+
+Export-ModuleMember -Function `
+    Show-Header,
+    Select-User,
+    Show-ProfMigConfiguration,
+    Start-ProfMigMenu

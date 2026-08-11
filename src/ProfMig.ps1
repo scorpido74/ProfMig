@@ -3,8 +3,8 @@
     ProfMig main application entry point.
 
 .DESCRIPTION
-    Initializes the ProfMig configuration, core framework and logging
-    components before starting the application.
+    Initializes the ProfMig configuration, core framework, logging,
+    inventory engine and interactive menu.
 
     This script acts as the central entry point for ProfMig.
 #>
@@ -12,11 +12,16 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Determine ProfMig paths.
+
+# -----------------------------------------------------------------------------
+# Determine ProfMig paths
+# -----------------------------------------------------------------------------
+
 $SourceRoot  = Split-Path -Parent $PSCommandPath
 $ProjectRoot = Split-Path -Parent $SourceRoot
 $ModuleRoot  = Join-Path $SourceRoot 'Modules'
 $ConfigPath  = Join-Path $SourceRoot 'Config.psd1'
+
 
 try {
 
@@ -27,6 +32,8 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Configuration.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Core.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Logging.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Inventory.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Menu.psm1') -Force
 
 
     # -------------------------------------------------------------------------
@@ -44,7 +51,8 @@ try {
     # Initialize core framework
     # -------------------------------------------------------------------------
 
-    $null = Initialize-ProfMig -Configuration $Config
+    $null = Initialize-ProfMig `
+        -Configuration $Config
 
 
     # -------------------------------------------------------------------------
@@ -53,16 +61,21 @@ try {
 
     if ($Config.Paths -and $Config.Paths.Logs) {
 
-        $LogFolder = Join-Path $ProjectRoot $Config.Paths.Logs
+        $LogFolder = Join-Path `
+            $ProjectRoot `
+            $Config.Paths.Logs
 
     }
     else {
 
-        $LogFolder = Join-Path $ProjectRoot 'Logs'
-
+        $LogFolder = Join-Path `
+            $ProjectRoot `
+            'Logs'
     }
 
-    Initialize-Logging -LogFolder $LogFolder | Out-Null
+    Initialize-Logging `
+        -LogFolder $LogFolder |
+        Out-Null
 
 
     # -------------------------------------------------------------------------
@@ -73,7 +86,7 @@ try {
 
 
     # -------------------------------------------------------------------------
-    # Start ProfMig
+    # Display startup information
     # -------------------------------------------------------------------------
 
     Show-ProfMigBanner
@@ -84,17 +97,43 @@ try {
 
 
     # -------------------------------------------------------------------------
-    # ProfMig application
+    # Build Windows profile inventory
     # -------------------------------------------------------------------------
 
-    # Menu integration will be started here.
+    Write-Info 'Starting profile inventory.'
+
+    $Profiles = @(
+        Get-UserProfiles `
+            -ExcludedProfiles $Config.ExcludedProfiles
+    )
+
+    Write-Info "Profile inventory completed. $($Profiles.Count) profile(s) found."
+
+
+    if ($Profiles.Count -eq 0) {
+        throw 'No Windows user profiles were found.'
+    }
+
+
+    # -------------------------------------------------------------------------
+    # Start interactive ProfMig menu
+    # -------------------------------------------------------------------------
+
+    Write-Info 'Starting interactive menu.'
+
+    $null = Start-ProfMigMenu `
+        -Configuration $Config `
+        -Profiles $Profiles
 
 
     # -------------------------------------------------------------------------
     # Shutdown
     # -------------------------------------------------------------------------
 
+    Write-Info 'ProfMig session completed.'
+
     Stop-ProfMig
+
 }
 catch {
 
