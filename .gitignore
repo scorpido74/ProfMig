@@ -5,6 +5,7 @@
 logs/
 reports/
 backup/
+*.log
 
 # PowerShell
 *.ps1xml
@@ -22,3 +23,5 @@ Desktop.ini
 
 # Pester
 TestResults/
+
+
