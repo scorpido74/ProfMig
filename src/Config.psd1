@@ -1,19 +1,26 @@
-$Global:Config = @{
+@{
+    Application = @{
+        Name    = 'ProfMig'
+        Version = '1.0'
+        Build   = 'Development'
+    }
+
+    Paths = @{
+        Logs    = 'Logs'
+        Reports = 'Reports'
+        Backup  = 'Backup'
+    }
 
     ExcludedProfiles = @(
-        "All Users",
-        "Default",
-        "Default User",
-        "Public",
-        "defaultuser0",
-        "WDAGUtilityAccount",
-        "Administrator"
+        'All Users'
+        'Default'
+        'Default User'
+        'Public'
+        'defaultuser0'
+        'WDAGUtilityAccount'
+        'Administrator'
+        'systemprofile'
+        'LocalService'
+        'NetworkService'
     )
-
-    LogFolder = "C:\Install\Logs"
-
-    ReportFolder = "C:\Install\Reports"
-
-    Version = "1.0"
-
 }
