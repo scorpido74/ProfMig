@@ -33,6 +33,7 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Core.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Logging.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.CopyEngine.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Reporting.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Inventory.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Menu.psm1') -Force
 
@@ -54,6 +55,23 @@ try {
 
     $null = Initialize-ProfMig `
         -Configuration $Config
+
+# -------------------------------------------------------------------------
+# Resolve report folder
+# -------------------------------------------------------------------------
+
+if ($Config.Paths -and $Config.Paths.Reports) {
+
+    $ReportFolder = Join-Path `
+        $ProjectRoot `
+        $Config.Paths.Reports
+}
+else {
+
+    $ReportFolder = Join-Path `
+        $ProjectRoot `
+        'Reports'
+}
 
 
     # -------------------------------------------------------------------------
@@ -122,10 +140,10 @@ try {
 
     Write-Info 'Starting interactive menu.'
 
-    $null = Start-ProfMigMenu `
-        -Configuration $Config `
-        -Profiles $Profiles
-
+   $null = Start-ProfMigMenu `
+    -Configuration $Config `
+    -Profiles $Profiles `
+    -ReportFolder $ReportFolder
 
     # -------------------------------------------------------------------------
     # Shutdown
