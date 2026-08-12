@@ -25,3 +25,6 @@ Desktop.ini
 TestResults/
 
 
+
+# Local ProfMig test data
+TestData/
