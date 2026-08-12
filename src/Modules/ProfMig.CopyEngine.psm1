@@ -440,6 +440,33 @@ function Copy-ProfMigComponent {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Public function: Invoke-ProfMigComponentCopy
+# ---------------------------------------------------------------------------
+
+function Invoke-ProfMigComponentCopy {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Component,
+
+        [Parameter(Mandatory)]
+        [string]$SourcePath,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationPath,
+
+        [Parameter()]
+        [string[]]$Exclusions = @()
+    )
+
+    return Copy-ProfMigComponent `
+        -Component $Component `
+        -SourcePath $SourcePath `
+        -DestinationPath $DestinationPath `
+        -Exclusions $Exclusions
+}
+
 
 # ---------------------------------------------------------------------------
 # Public function: Invoke-ProfMigCopy
@@ -723,4 +750,7 @@ function Invoke-ProfMigCopy {
 }
 
 
-Export-ModuleMember -Function Invoke-ProfMigCopy
+Export-ModuleMember -Function @(
+    'Invoke-ProfMigCopy'
+    'Invoke-ProfMigComponentCopy'
+)
