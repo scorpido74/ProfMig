@@ -9,10 +9,15 @@
     The copy engine is independent from the interactive menu,
     future GUI, silent execution mode, and reporting implementation.
 
+    All migration operations return structured result data so that
+    reporting, GUI and automation components can consume the results
+    without implementing migration logic themselves.
+
 .NOTES
     Project : ProfMig
     Module  : ProfMig.CopyEngine
     Sprint  : 1.6 - Copy Engine
+    Updated : 1.7 - Reporting integration
 #>
 
 Set-StrictMode -Version Latest
@@ -133,7 +138,15 @@ function Copy-ProfMigComponent {
     $filesExcluded = 0
     $filesFailed   = 0
     $bytesCopied   = [int64]0
+
+    $skippedItems  = @()
+    $excludedItems = @()
     $errors        = @()
+
+
+    # -----------------------------------------------------------------------
+    # Validate source folder
+    # -----------------------------------------------------------------------
 
     if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
 
@@ -146,16 +159,26 @@ function Copy-ProfMigComponent {
             StartedAt       = $componentStartedAt
             CompletedAt     = $componentCompletedAt
             Duration        = ($componentCompletedAt - $componentStartedAt)
+
             FilesSelected   = 0
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
             BytesCopied     = [int64]0
+
             Status          = 'SourceNotFound'
+
+            SkippedItems    = @()
+            ExcludedItems   = @()
             Errors          = @()
         }
     }
+
+
+    # -----------------------------------------------------------------------
+    # Ensure destination folder exists
+    # -----------------------------------------------------------------------
 
     try {
 
@@ -165,7 +188,8 @@ function Copy-ProfMigComponent {
                 -Path $DestinationPath `
                 -ItemType Directory `
                 -Force `
-                -ErrorAction Stop | Out-Null
+                -ErrorAction Stop |
+                Out-Null
         }
     }
     catch {
@@ -179,13 +203,19 @@ function Copy-ProfMigComponent {
             StartedAt       = $componentStartedAt
             CompletedAt     = $componentCompletedAt
             Duration        = ($componentCompletedAt - $componentStartedAt)
+
             FilesSelected   = 0
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
             BytesCopied     = [int64]0
+
             Status          = 'Failed'
+
+            SkippedItems    = @()
+            ExcludedItems   = @()
+
             Errors          = @(
                 [PSCustomObject]@{
                     Component       = $Component
@@ -196,6 +226,11 @@ function Copy-ProfMigComponent {
             )
         }
     }
+
+
+    # -----------------------------------------------------------------------
+    # Discover source files
+    # -----------------------------------------------------------------------
 
     try {
 
@@ -218,13 +253,19 @@ function Copy-ProfMigComponent {
             StartedAt       = $componentStartedAt
             CompletedAt     = $componentCompletedAt
             Duration        = ($componentCompletedAt - $componentStartedAt)
+
             FilesSelected   = 0
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
             BytesCopied     = [int64]0
+
             Status          = 'Failed'
+
+            SkippedItems    = @()
+            ExcludedItems   = @()
+
             Errors          = @(
                 [PSCustomObject]@{
                     Component       = $Component
@@ -236,6 +277,11 @@ function Copy-ProfMigComponent {
         }
     }
 
+
+    # -----------------------------------------------------------------------
+    # Process files
+    # -----------------------------------------------------------------------
+
     foreach ($file in $files) {
 
         $filesSelected++
@@ -243,14 +289,31 @@ function Copy-ProfMigComponent {
         $relativePath = $file.FullName.Substring($SourcePath.Length)
         $relativePath = $relativePath.TrimStart('\')
 
+        # -------------------------------------------------------------------
+        # Exclusion policy
+        # -------------------------------------------------------------------
+
         $isExcluded = Test-ProfMigExclusion `
             -RelativePath $relativePath `
             -Exclusions $Exclusions
 
         if ($isExcluded) {
+
             $filesExcluded++
+
+            $excludedItems += [PSCustomObject]@{
+                Component  = $Component
+                SourceFile = $file.FullName
+                Reason     = 'Excluded by migration rule'
+            }
+
             continue
         }
+
+
+        # -------------------------------------------------------------------
+        # Build destination path
+        # -------------------------------------------------------------------
 
         $destinationFile = Join-Path `
             -Path $DestinationPath `
@@ -260,23 +323,54 @@ function Copy-ProfMigComponent {
             -Path $destinationFile `
             -Parent
 
+
         try {
 
-            if (-not (Test-Path -LiteralPath $destinationDirectory -PathType Container)) {
+            if (
+                -not (
+                    Test-Path `
+                        -LiteralPath $destinationDirectory `
+                        -PathType Container
+                )
+            ) {
 
                 New-Item `
                     -Path $destinationDirectory `
                     -ItemType Directory `
                     -Force `
-                    -ErrorAction Stop | Out-Null
+                    -ErrorAction Stop |
+                    Out-Null
             }
 
-            # Existing-file policy:
-            # never overwrite existing destination data.
-            if (Test-Path -LiteralPath $destinationFile -PathType Leaf) {
+
+            # ---------------------------------------------------------------
+            # Existing-file policy
+            #
+            # Never overwrite existing destination data.
+            # ---------------------------------------------------------------
+
+            if (
+                Test-Path `
+                    -LiteralPath $destinationFile `
+                    -PathType Leaf
+            ) {
+
                 $filesSkipped++
+
+                $skippedItems += [PSCustomObject]@{
+                    Component       = $Component
+                    SourceFile      = $file.FullName
+                    DestinationFile = $destinationFile
+                    Reason          = 'Destination file already exists'
+                }
+
                 continue
             }
+
+
+            # ---------------------------------------------------------------
+            # Copy file
+            # ---------------------------------------------------------------
 
             Copy-Item `
                 -LiteralPath $file.FullName `
@@ -299,29 +393,49 @@ function Copy-ProfMigComponent {
         }
     }
 
+
+    # -----------------------------------------------------------------------
+    # Determine component status
+    # -----------------------------------------------------------------------
+
     if ($filesFailed -gt 0) {
         $status = 'CompletedWithErrors'
+    }
+    elseif ($filesSkipped -gt 0) {
+        $status = 'CompletedWithWarnings'
     }
     else {
         $status = 'Success'
     }
 
+
     $componentCompletedAt = Get-Date
+
+
+    # -----------------------------------------------------------------------
+    # Return structured component result
+    # -----------------------------------------------------------------------
 
     return [PSCustomObject]@{
         Component       = $Component
         SourcePath      = $SourcePath
         DestinationPath = $DestinationPath
+
         StartedAt       = $componentStartedAt
         CompletedAt     = $componentCompletedAt
         Duration        = ($componentCompletedAt - $componentStartedAt)
+
         FilesSelected   = $filesSelected
         FilesCopied     = $filesCopied
         FilesSkipped    = $filesSkipped
         FilesExcluded   = $filesExcluded
         FilesFailed     = $filesFailed
         BytesCopied     = $bytesCopied
+
         Status          = $status
+
+        SkippedItems    = $skippedItems
+        ExcludedItems   = $excludedItems
         Errors          = $errors
     }
 }
@@ -346,6 +460,7 @@ function Invoke-ProfMigCopy {
 
     $migrationStartedAt = Get-Date
 
+
     # -----------------------------------------------------------------------
     # Validate profiles
     # -----------------------------------------------------------------------
@@ -358,12 +473,18 @@ function Invoke-ProfMigCopy {
         throw "Destination profile does not exist: $DestinationProfile"
     }
 
-    $resolvedSource = (Resolve-Path -LiteralPath $SourceProfile).Path.TrimEnd('\')
-    $resolvedDestination = (Resolve-Path -LiteralPath $DestinationProfile).Path.TrimEnd('\')
+    $resolvedSource = (
+        Resolve-Path -LiteralPath $SourceProfile
+    ).Path.TrimEnd('\')
+
+    $resolvedDestination = (
+        Resolve-Path -LiteralPath $DestinationProfile
+    ).Path.TrimEnd('\')
 
     if ($resolvedSource -ieq $resolvedDestination) {
         throw 'Source and destination profiles cannot be the same.'
     }
+
 
     # -----------------------------------------------------------------------
     # Read configuration
@@ -403,8 +524,16 @@ function Invoke-ProfMigCopy {
         $additionalFolders = @($Configuration.AdditionalFolders)
     }
 
-    $components = @()
-    $migrationErrors = @()
+
+    # -----------------------------------------------------------------------
+    # Migration result collections
+    # -----------------------------------------------------------------------
+
+    $components            = @()
+    $migrationErrors       = @()
+    $migrationSkippedItems = @()
+    $migrationExcludedItems = @()
+
 
     # -----------------------------------------------------------------------
     # Standard folders
@@ -432,10 +561,19 @@ function Invoke-ProfMigCopy {
 
         $components += $componentResult
 
+        if ($componentResult.SkippedItems.Count -gt 0) {
+            $migrationSkippedItems += $componentResult.SkippedItems
+        }
+
+        if ($componentResult.ExcludedItems.Count -gt 0) {
+            $migrationExcludedItems += $componentResult.ExcludedItems
+        }
+
         if ($componentResult.Errors.Count -gt 0) {
             $migrationErrors += $componentResult.Errors
         }
     }
+
 
     # -----------------------------------------------------------------------
     # Additional folders
@@ -477,10 +615,19 @@ function Invoke-ProfMigCopy {
 
         $components += $componentResult
 
+        if ($componentResult.SkippedItems.Count -gt 0) {
+            $migrationSkippedItems += $componentResult.SkippedItems
+        }
+
+        if ($componentResult.ExcludedItems.Count -gt 0) {
+            $migrationExcludedItems += $componentResult.ExcludedItems
+        }
+
         if ($componentResult.Errors.Count -gt 0) {
             $migrationErrors += $componentResult.Errors
         }
     }
+
 
     # -----------------------------------------------------------------------
     # Calculate migration totals
@@ -494,6 +641,7 @@ function Invoke-ProfMigCopy {
     $totalBytesCopied   = [int64]0
 
     foreach ($component in $components) {
+
         $totalFilesSelected += $component.FilesSelected
         $totalFilesCopied   += $component.FilesCopied
         $totalFilesSkipped  += $component.FilesSkipped
@@ -511,15 +659,24 @@ function Invoke-ProfMigCopy {
         BytesCopied   = $totalBytesCopied
     }
 
+
     # -----------------------------------------------------------------------
     # Determine overall status
     # -----------------------------------------------------------------------
 
     $failedComponents = @(
-        $components | Where-Object {
-            $_.Status -eq 'Failed' -or
-            $_.Status -eq 'CompletedWithErrors'
-        }
+        $components |
+            Where-Object {
+                $_.Status -eq 'Failed' -or
+                $_.Status -eq 'CompletedWithErrors'
+            }
+    )
+
+    $warningComponents = @(
+        $components |
+            Where-Object {
+                $_.Status -eq 'CompletedWithWarnings'
+            }
     )
 
     if (
@@ -528,11 +685,19 @@ function Invoke-ProfMigCopy {
     ) {
         $overallStatus = 'CompletedWithErrors'
     }
+    elseif (
+        $warningComponents.Count -gt 0 -or
+        $migrationSkippedItems.Count -gt 0
+    ) {
+        $overallStatus = 'CompletedWithWarnings'
+    }
     else {
         $overallStatus = 'Success'
     }
 
+
     $migrationCompletedAt = Get-Date
+
 
     # -----------------------------------------------------------------------
     # Return reporting-ready migration result
@@ -541,12 +706,18 @@ function Invoke-ProfMigCopy {
     return [PSCustomObject]@{
         SourceProfile      = $resolvedSource
         DestinationProfile = $resolvedDestination
+
         StartedAt          = $migrationStartedAt
         CompletedAt        = $migrationCompletedAt
         Duration           = ($migrationCompletedAt - $migrationStartedAt)
+
         Status             = $overallStatus
+
         Totals             = $totals
         Components         = $components
+
+        SkippedItems       = $migrationSkippedItems
+        ExcludedItems      = $migrationExcludedItems
         Errors             = $migrationErrors
     }
 }
