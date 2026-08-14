@@ -148,7 +148,7 @@ function Copy-ProfMigComponent {
     # Validate source folder
     # -----------------------------------------------------------------------
 
-    if (-not (Test-Path -LiteralPath $SourcePath -PathType Container)) {
+     if (-not (Test-Path -LiteralPath $SourcePath)) {
 
         $componentCompletedAt = Get-Date
 
@@ -182,7 +182,45 @@ function Copy-ProfMigComponent {
 
     try {
 
-        if (-not (Test-Path -LiteralPath $DestinationPath -PathType Container)) {
+    $sourceItem = Get-Item `
+        -LiteralPath $SourcePath `
+        -Force `
+        -ErrorAction Stop
+
+    $sourceIsFile = -not $sourceItem.PSIsContainer
+
+    if ($sourceIsFile) {
+
+        $destinationDirectory = Split-Path `
+            -Path $DestinationPath `
+            -Parent
+
+        if (
+            -not [string]::IsNullOrWhiteSpace($destinationDirectory) -and
+            -not (
+                Test-Path `
+                    -LiteralPath $destinationDirectory `
+                    -PathType Container
+            )
+        ) {
+
+            New-Item `
+                -Path $destinationDirectory `
+                -ItemType Directory `
+                -Force `
+                -ErrorAction Stop |
+                Out-Null
+        }
+    }
+    else {
+
+        if (
+            -not (
+                Test-Path `
+                    -LiteralPath $DestinationPath `
+                    -PathType Container
+            )
+        ) {
 
             New-Item `
                 -Path $DestinationPath `
@@ -192,6 +230,7 @@ function Copy-ProfMigComponent {
                 Out-Null
         }
     }
+}
     catch {
 
         $componentCompletedAt = Get-Date
@@ -232,7 +271,15 @@ function Copy-ProfMigComponent {
     # Discover source files
     # -----------------------------------------------------------------------
 
-    try {
+try {
+
+    if ($sourceIsFile) {
+
+        $files = @(
+            $sourceItem
+        )
+    }
+    else {
 
         $files = @(
             Get-ChildItem `
@@ -242,6 +289,7 @@ function Copy-ProfMigComponent {
                 -ErrorAction Stop
         )
     }
+}
     catch {
 
         $componentCompletedAt = Get-Date
@@ -286,8 +334,13 @@ function Copy-ProfMigComponent {
 
         $filesSelected++
 
-        $relativePath = $file.FullName.Substring($SourcePath.Length)
-        $relativePath = $relativePath.TrimStart('\')
+       if ($sourceIsFile) {
+    $relativePath = $file.Name
+}
+else {
+    $relativePath = $file.FullName.Substring($SourcePath.Length)
+    $relativePath = $relativePath.TrimStart('\')
+}
 
         # -------------------------------------------------------------------
         # Exclusion policy
@@ -315,9 +368,14 @@ function Copy-ProfMigComponent {
         # Build destination path
         # -------------------------------------------------------------------
 
-        $destinationFile = Join-Path `
-            -Path $DestinationPath `
-            -ChildPath $relativePath
+if ($sourceIsFile) {
+    $destinationFile = $DestinationPath
+}
+else {
+    $destinationFile = Join-Path `
+        -Path $DestinationPath `
+        -ChildPath $relativePath
+}
 
         $destinationDirectory = Split-Path `
             -Path $destinationFile `

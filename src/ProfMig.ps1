@@ -35,8 +35,11 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.CopyEngine.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Reporting.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Inventory.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Applications.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Browser.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Edge.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Chrome.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Menu.psm1') -Force
-
 
     # -------------------------------------------------------------------------
     # Load configuration
