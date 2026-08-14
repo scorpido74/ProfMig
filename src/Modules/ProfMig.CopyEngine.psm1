@@ -807,8 +807,196 @@ function Invoke-ProfMigCopy {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Public function: Invoke-ProfMigFileCopy
+# ---------------------------------------------------------------------------
+
+function Invoke-ProfMigFileCopy {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Component,
+
+        [Parameter(Mandatory)]
+        [string]$SourceFile,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationFile
+    )
+
+    $startedAt = Get-Date
+
+    $filesSelected = 1
+    $filesCopied   = 0
+    $filesSkipped  = 0
+    $filesFailed   = 0
+    $bytesCopied   = [int64]0
+
+    $skippedItems = @()
+    $errors       = @()
+
+
+    # -----------------------------------------------------------------------
+    # Validate source
+    # -----------------------------------------------------------------------
+
+    if (
+        -not (
+            Test-Path `
+                -LiteralPath $SourceFile `
+                -PathType Leaf
+        )
+    ) {
+
+        $completedAt = Get-Date
+
+        return [PSCustomObject]@{
+            Component       = $Component
+            SourcePath      = $SourceFile
+            DestinationPath = $DestinationFile
+
+            StartedAt       = $startedAt
+            CompletedAt     = $completedAt
+            Duration        = ($completedAt - $startedAt)
+
+            FilesSelected   = 1
+            FilesCopied     = 0
+            FilesSkipped    = 0
+            FilesExcluded   = 0
+            FilesFailed     = 1
+            BytesCopied     = [int64]0
+
+            Status          = 'Failed'
+
+            SkippedItems    = @()
+            ExcludedItems   = @()
+
+            Errors          = @(
+                [PSCustomObject]@{
+                    Component       = $Component
+                    SourceFile      = $SourceFile
+                    DestinationFile = $DestinationFile
+                    Error           = 'Source file does not exist.'
+                }
+            )
+        }
+    }
+
+
+    try {
+
+        $sourceItem = Get-Item `
+            -LiteralPath $SourceFile `
+            -Force `
+            -ErrorAction Stop
+
+        $destinationDirectory = Split-Path `
+            -Path $DestinationFile `
+            -Parent
+
+        if (
+            -not (
+                Test-Path `
+                    -LiteralPath $destinationDirectory `
+                    -PathType Container
+            )
+        ) {
+
+            New-Item `
+                -Path $destinationDirectory `
+                -ItemType Directory `
+                -Force `
+                -ErrorAction Stop |
+                Out-Null
+        }
+
+
+        # -------------------------------------------------------------------
+        # Never overwrite destination data
+        # -------------------------------------------------------------------
+
+        if (
+            Test-Path `
+                -LiteralPath $DestinationFile `
+                -PathType Leaf
+        ) {
+
+            $filesSkipped = 1
+
+            $skippedItems += [PSCustomObject]@{
+                Component       = $Component
+                SourceFile      = $SourceFile
+                DestinationFile = $DestinationFile
+                Reason          = 'Destination file already exists'
+            }
+        }
+        else {
+
+            Copy-Item `
+                -LiteralPath $SourceFile `
+                -Destination $DestinationFile `
+                -ErrorAction Stop
+
+            $filesCopied = 1
+            $bytesCopied = [int64]$sourceItem.Length
+        }
+    }
+    catch {
+
+        $filesFailed = 1
+
+        $errors += [PSCustomObject]@{
+            Component       = $Component
+            SourceFile      = $SourceFile
+            DestinationFile = $DestinationFile
+            Error           = $_.Exception.Message
+        }
+    }
+
+
+    # -----------------------------------------------------------------------
+    # Determine status
+    # -----------------------------------------------------------------------
+
+    if ($filesFailed -gt 0) {
+        $status = 'CompletedWithErrors'
+    }
+    elseif ($filesSkipped -gt 0) {
+        $status = 'CompletedWithWarnings'
+    }
+    else {
+        $status = 'Success'
+    }
+
+    $completedAt = Get-Date
+
+
+    return [PSCustomObject]@{
+        Component       = $Component
+        SourcePath      = $SourceFile
+        DestinationPath = $DestinationFile
+
+        StartedAt       = $startedAt
+        CompletedAt     = $completedAt
+        Duration        = ($completedAt - $startedAt)
+
+        FilesSelected   = $filesSelected
+        FilesCopied     = $filesCopied
+        FilesSkipped    = $filesSkipped
+        FilesExcluded   = 0
+        FilesFailed     = $filesFailed
+        BytesCopied     = $bytesCopied
+
+        Status          = $status
+
+        SkippedItems    = @($skippedItems)
+        ExcludedItems   = @()
+        Errors          = @($errors)
+    }
+}
 
 Export-ModuleMember -Function @(
     'Invoke-ProfMigCopy'
     'Invoke-ProfMigComponentCopy'
+    'Invoke-ProfMigFileCopy'
 )
