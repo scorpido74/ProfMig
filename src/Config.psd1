@@ -6,9 +6,10 @@
     }
 
     Paths = @{
-        Logs    = 'Logs'
-        Reports = 'Reports'
-        Backup  = 'Backup'
+        Logs                   = 'Logs'
+        Reports                = 'Reports'
+        Backup                 = 'Backup'
+        ApplicationDefinitions = 'Applications'
     }
 
     ExcludedProfiles = @(

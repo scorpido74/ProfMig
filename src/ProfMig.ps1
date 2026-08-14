@@ -36,6 +36,7 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Reporting.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Inventory.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Applications.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.AppMigration.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Browser.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Edge.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Chrome.psm1') -Force
@@ -52,6 +53,37 @@ try {
         throw 'ProfMig configuration could not be loaded.'
     }
 
+        # -------------------------------------------------------------------------
+    # Resolve application definition folder
+    # -------------------------------------------------------------------------
+
+    if (
+        $Config.Paths -and
+        $Config.Paths.ApplicationDefinitions
+    ) {
+        $ApplicationDefinitionFolder = Join-Path `
+            $SourceRoot `
+            $Config.Paths.ApplicationDefinitions
+    }
+    else {
+        $ApplicationDefinitionFolder = Join-Path `
+            $SourceRoot `
+            'Applications'
+    }
+
+    if (
+        -not (
+            Test-Path `
+                -LiteralPath $ApplicationDefinitionFolder `
+                -PathType Container
+        )
+    ) {
+        throw (
+            'Application definition folder was not found: ' +
+            $ApplicationDefinitionFolder
+        )
+    }
+
 
     # -------------------------------------------------------------------------
     # Initialize core framework
@@ -60,64 +92,99 @@ try {
     $null = Initialize-ProfMig `
         -Configuration $Config
 
-# -------------------------------------------------------------------------
-# Resolve report folder
-# -------------------------------------------------------------------------
-
-if ($Config.Paths -and $Config.Paths.Reports) {
-
-    $ReportFolder = Join-Path `
-        $ProjectRoot `
-        $Config.Paths.Reports
-}
-else {
-
-    $ReportFolder = Join-Path `
-        $ProjectRoot `
-        'Reports'
-}
-
-
     # -------------------------------------------------------------------------
-    # Initialize logging
+    # Load generic application definitions
     # -------------------------------------------------------------------------
 
-    if ($Config.Paths -and $Config.Paths.Logs) {
+    $ApplicationDefinitions = @(
+        Get-ProfMigApplicationDefinitions `
+            -Path $ApplicationDefinitionFolder
+    )
 
-        $LogFolder = Join-Path `
+    $InvalidApplicationDefinitions = @(
+        $ApplicationDefinitions |
+            Where-Object {
+                -not $_.Valid
+            }
+    )
+
+    if ($InvalidApplicationDefinitions.Count -gt 0) {
+
+        $invalidFiles = @(
+            $InvalidApplicationDefinitions |
+                ForEach-Object {
+                    $_.File
+                }
+        )
+
+        throw (
+            'One or more application definitions are invalid: ' +
+            ($invalidFiles -join ', ')
+        )
+    }
+
+    # -------------------------------------------------------------------------
+    # Resolve report folder
+    # -------------------------------------------------------------------------
+
+    if ($Config.Paths -and $Config.Paths.Reports) {
+
+        $ReportFolder = Join-Path `
             $ProjectRoot `
-            $Config.Paths.Logs
-
+            $Config.Paths.Reports
     }
     else {
 
-        $LogFolder = Join-Path `
+        $ReportFolder = Join-Path `
             $ProjectRoot `
-            'Logs'
+            'Reports'
     }
 
-    Initialize-Logging `
-        -LogFolder $LogFolder |
-        Out-Null
+
+        # -------------------------------------------------------------------------
+        # Initialize logging
+        # -------------------------------------------------------------------------
+
+        if ($Config.Paths -and $Config.Paths.Logs) {
+
+            $LogFolder = Join-Path `
+                $ProjectRoot `
+                $Config.Paths.Logs
+
+        }
+        else {
+
+            $LogFolder = Join-Path `
+                $ProjectRoot `
+                'Logs'
+        }
+
+        Initialize-Logging `
+            -LogFolder $LogFolder |
+            Out-Null
 
 
-    # -------------------------------------------------------------------------
-    # Validate environment
-    # -------------------------------------------------------------------------
+        # -------------------------------------------------------------------------
+        # Validate environment
+        # -------------------------------------------------------------------------
 
-    Test-ProfMigEnvironment
+        Test-ProfMigEnvironment
 
 
-    # -------------------------------------------------------------------------
-    # Display startup information
-    # -------------------------------------------------------------------------
+        # -------------------------------------------------------------------------
+        # Display startup information
+        # -------------------------------------------------------------------------
 
-    Show-ProfMigBanner
+        Show-ProfMigBanner
 
-    Write-Success 'Core Framework loaded successfully.'
-    Write-Info 'Logging initialized.'
-    Write-Info 'ProfMig startup completed.'
+        Write-Success 'Core Framework loaded successfully.'
+        Write-Info 'Logging initialized.'
+        Write-Info 'ProfMig startup completed.'
 
+        Write-Info (
+            'Generic application framework loaded. ' +
+            "$($ApplicationDefinitions.Count) definition(s) available."
+        )
 
     # -------------------------------------------------------------------------
     # Build Windows profile inventory
