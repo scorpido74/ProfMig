@@ -17,6 +17,21 @@
 
 Set-StrictMode -Version Latest
 
+$exclusionModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Exclusions.psm1'
+
+if (-not (Test-Path -LiteralPath $exclusionModulePath)) {
+    throw "ProfMig exclusions module not found: $exclusionModulePath"
+}
+
+Import-Module `
+    -Name $exclusionModulePath `
+    -Force `
+    -ErrorAction Stop
+
+Initialize-ProfMigDefaultExclusions
+
 
 function Get-ProfMigChromeUserDataPath {
     [CmdletBinding()]
@@ -294,7 +309,7 @@ function Get-ProfMigChromeProfileData {
     # Explicit allowlist.
     #
     # Only data explicitly classified as portable is eligible
-    # for migration.
+    # for migration. Central exclusion rules always take precedence.
     #
     $includeRules = @(
         [PSCustomObject]@{
@@ -340,170 +355,87 @@ function Get-ProfMigChromeProfileData {
         }
     )
 
-    #
-    # Explicit denylist.
-    #
-    # These items may contain credentials, authentication material,
-    # encrypted information, account state, certificates or sessions.
-    #
-    $excludeRules = @(
-        [PSCustomObject]@{
-            Name   = 'Login Data'
-            Reason = 'Contains protected saved credentials'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Login Data For Account'
-            Reason = 'Contains protected account credentials'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Network'
-            Reason = 'May contain cookies and authentication/session state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Extension Cookies'
-            Reason = 'Contains extension cookie/session data'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Sessions'
-            Reason = 'Contains active browser session information'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Session Storage'
-            Reason = 'Contains website session state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Web Data'
-            Reason = 'May contain autofill and payment-related information'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Account Web Data'
-            Reason = 'Contains Google account-specific browser data'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Accounts'
-            Reason = 'Contains Google account state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Sync Data'
-            Reason = 'Contains Google synchronization state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'GCM Store'
-            Reason = 'Contains Google messaging/account state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'ClientCertificates'
-            Reason = 'Contains client certificate-related security data'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'passkey_enclave_state'
-            Reason = 'Contains passkey-related security state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'trusted_vault.pb'
-            Reason = 'Contains trusted vault/security state'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'EncryptedBookmarks'
-            Reason = 'Encrypted Chrome data is not migrated'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Secure Preferences'
-            Reason = 'Security/integrity-sensitive Chrome preferences'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Managed Extension Settings'
-            Reason = 'Managed settings should be recreated through policy'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Extensions'
-            Reason = 'Extension packages are inventoried but not migrated'
-        }
-
-        [PSCustomObject]@{
-            Name   = 'Local Extension Settings'
-            Reason = 'Extension state may contain sensitive or account-bound data'
-        }
-    )
-
     $included = @()
 
     foreach ($rule in $includeRules) {
 
         $itemPath = Join-Path $ChromeProfilePath $rule.Name
 
-        if (Test-Path -LiteralPath $itemPath) {
+        if (-not (Test-Path -LiteralPath $itemPath)) {
+            continue
+        }
 
-            $item =
-                Get-Item -LiteralPath $itemPath -Force -ErrorAction SilentlyContinue
+        $exclusionResult = Test-ProfMigExclusion `
+            -RelativePath $rule.Name `
+            -Application 'Chrome'
 
-            $included += [PSCustomObject]@{
-                Name   = $rule.Name
-                Path   = $itemPath
-                Type   = $rule.Type
-                Exists = $true
-                Size   = if ($item -and -not $item.PSIsContainer) {
-                    $item.Length
-                }
-                else {
-                    $null
-                }
-                Status = 'Include'
-                Reason = $rule.Reason
+        if ($exclusionResult.Excluded) {
+            continue
+        }
+
+        $item =
+            Get-Item `
+                -LiteralPath $itemPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+        $included += [PSCustomObject]@{
+            Name   = $rule.Name
+            Path   = $itemPath
+            Type   = $rule.Type
+            Exists = $true
+            Size   = if ($item -and -not $item.PSIsContainer) {
+                $item.Length
             }
+            else {
+                $null
+            }
+            Status = 'Include'
+            Reason = $rule.Reason
         }
     }
 
+    #
+    # Central exclusion engine.
+    #
+    # Evaluate every direct item in the Chrome profile against the
+    # ProfMig exclusion rules. Directory rules protect their complete
+    # subtree during copy operations. FileName rules also match the
+    # associated SQLite -journal, -wal and -shm files in the exclusion
+    # engine.
+    #
     $excluded = @()
 
-    foreach ($rule in $excludeRules) {
+    $profileItems = @(
+        Get-ChildItem `
+            -LiteralPath $ChromeProfilePath `
+            -Force `
+            -ErrorAction SilentlyContinue
+    )
 
-        $itemPath = Join-Path $ChromeProfilePath $rule.Name
+    foreach ($item in $profileItems) {
 
-        if (Test-Path -LiteralPath $itemPath) {
+        $relativePath = $item.Name
 
-            $excluded += [PSCustomObject]@{
-                Name   = $rule.Name
-                Path   = $itemPath
-                Status = 'Excluded'
-                Reason = $rule.Reason
-            }
+        $exclusionResult = Test-ProfMigExclusion `
+            -RelativePath $relativePath `
+            -Application 'Chrome' `
+            -IsDirectory:$item.PSIsContainer
+
+        if (-not $exclusionResult.Excluded) {
+            continue
         }
 
-        #
-        # Detect associated SQLite database files as protected as well.
-        #
-        foreach ($suffix in @('-journal', '-wal', '-shm')) {
-
-            $associatedName = "$($rule.Name)$suffix"
-            $associatedPath = Join-Path $ChromeProfilePath $associatedName
-
-            if (Test-Path -LiteralPath $associatedPath) {
-
-                $excluded += [PSCustomObject]@{
-                    Name   = $associatedName
-                    Path   = $associatedPath
-                    Status = 'Excluded'
-                    Reason = "Associated protected database file for $($rule.Name)"
-                }
-            }
+        $excluded += [PSCustomObject]@{
+            Name              = $item.Name
+            Path              = $item.FullName
+            Status            = 'Excluded'
+            Reason            = $exclusionResult.Reason
+            ExclusionRuleId   = $exclusionResult.RuleId
+            ExclusionType     = $exclusionResult.RuleType
+            ExclusionCategory = $exclusionResult.Category
+            Application       = $exclusionResult.Application
+            Mandatory         = $exclusionResult.Mandatory
         }
     }
 
@@ -515,7 +447,6 @@ function Get-ProfMigChromeProfileData {
         Excluded      = @($excluded)
     }
 }
-
 
 function Get-ProfMigChromeMigrationPlan {
     [CmdletBinding()]
@@ -1222,7 +1153,7 @@ Export-ModuleMember -Function @(
     'Get-ProfMigChromeProfiles',
     'Test-ProfMigChromeRunning',
     'Test-ProfMigChromeMigration',
-    'Invoke-ProfMigChromeMigration'
+    'Invoke-ProfMigChromeMigration',
     'Get-ProfMigChromeDetection',
     'Get-ProfMigChromeExtensions',
     'Get-ProfMigChromeProfileData',

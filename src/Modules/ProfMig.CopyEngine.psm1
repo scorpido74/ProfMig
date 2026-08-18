@@ -19,16 +19,41 @@
     Sprint  : 1.6 - Copy Engine
     Updated : 2.7 - Resilient traversal and application integration
 #>
-
 Set-StrictMode -Version Latest
 
+$exclusionModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Exclusions.psm1'
+
+if (-not (Test-Path -LiteralPath $exclusionModulePath)) {
+    throw "ProfMig exclusions module not found: $exclusionModulePath"
+}
+
+Import-Module `
+    -Name $exclusionModulePath `
+    -Force `
+    -ErrorAction Stop
+
+Initialize-ProfMigDefaultExclusions
+
+$loggingModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Logging.psm1'
+
+if (-not (Test-Path -LiteralPath $loggingModulePath)) {
+    throw "ProfMig logging module not found: $loggingModulePath"
+}
+
+Import-Module `
+    -Name $loggingModulePath `
+    -Force `
+    -ErrorAction Stop
 
 # ---------------------------------------------------------------------------
-# Internal function: Test-ProfMigExclusion
+# Internal function: Test-ProfMigLegacyExclusion
 # ---------------------------------------------------------------------------
 
-function Test-ProfMigExclusion {
-
+function Test-ProfMigLegacyExclusion {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
@@ -255,7 +280,7 @@ function Copy-ProfMigSingleFile {
     }
 
     if (
-        Test-ProfMigExclusion `
+        Test-ProfMigLegacyExclusion `
             -RelativePath $RelativePath `
             -Exclusions $Exclusions
     ) {
@@ -457,31 +482,62 @@ function Copy-ProfMigComponent {
 
     if (-not $sourceItem.PSIsContainer) {
 
-        $fileResult = Copy-ProfMigSingleFile `
-            -Component $Component `
-            -File $sourceItem `
-            -DestinationFile $DestinationPath `
-            -RelativePath $sourceItem.Name `
-            -Exclusions $Exclusions
+        $relativePath = $sourceItem.Name
 
-        $filesSelected += $fileResult.Selected
-        $filesCopied   += $fileResult.Copied
-        $filesSkipped  += $fileResult.Skipped
-        $filesExcluded += $fileResult.Excluded
-        $filesFailed   += $fileResult.Failed
-        $bytesCopied   += $fileResult.BytesCopied
+        $exclusionResult = Test-ProfMigExclusion `
+            -RelativePath $relativePath `
+            -Application $Component
 
-        if ($null -ne $fileResult.SkippedItem) {
-            $skippedItems += $fileResult.SkippedItem
+        if ($exclusionResult.Excluded) {
+
+            $filesSelected++
+            $filesExcluded++
+
+            $excludedItems += [PSCustomObject]@{
+                Component         = $Component
+                SourceFile        = $sourceItem.FullName
+                DestinationFile   = $DestinationPath
+                RelativePath      = $relativePath
+                Reason            = $exclusionResult.Reason
+                ExclusionRuleId   = $exclusionResult.RuleId
+                ExclusionType     = $exclusionResult.RuleType
+                ExclusionCategory = $exclusionResult.Category
+                Application       = $exclusionResult.Application
+                Mandatory         = $exclusionResult.Mandatory
+            }
+
+            Write-Info `
+                -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+        }
+        else {
+
+            $fileResult = Copy-ProfMigSingleFile `
+                -Component $Component `
+                -File $sourceItem `
+                -DestinationFile $DestinationPath `
+                -RelativePath $relativePath `
+                -Exclusions $Exclusions
+
+            $filesSelected += $fileResult.Selected
+            $filesCopied   += $fileResult.Copied
+            $filesSkipped  += $fileResult.Skipped
+            $filesExcluded += $fileResult.Excluded
+            $filesFailed   += $fileResult.Failed
+            $bytesCopied   += $fileResult.BytesCopied
+
+            if ($null -ne $fileResult.SkippedItem) {
+                $skippedItems += $fileResult.SkippedItem
+            }
+
+            if ($null -ne $fileResult.ExcludedItem) {
+                $excludedItems += $fileResult.ExcludedItem
+            }
+
+            if ($null -ne $fileResult.Error) {
+                $errors += $fileResult.Error
+            }
         }
 
-        if ($null -ne $fileResult.ExcludedItem) {
-            $excludedItems += $fileResult.ExcludedItem
-        }
-
-        if ($null -ne $fileResult.Error) {
-            $errors += $fileResult.Error
-        }
     }
 
     # -----------------------------------------------------------------------
@@ -603,9 +659,37 @@ function Copy-ProfMigComponent {
                         -BasePath $SourcePath `
                         -FullPath $child.FullName
 
-                    # Excluded directory: don't traverse it at all.
+                    # Central application exclusion policy takes precedence.
+                    $centralDirectoryExclusion = Test-ProfMigExclusion `
+                        -RelativePath $relativeDirectory `
+                        -Application $Component
+
+                    if ($centralDirectoryExclusion.Excluded) {
+
+                        $filesExcluded++
+
+                        $excludedItems += [PSCustomObject]@{
+                            Component         = $Component
+                            SourceFile        = $child.FullName
+                            DestinationFile   = $null
+                            RelativePath      = $relativeDirectory
+                            Reason            = $centralDirectoryExclusion.Reason
+                            ExclusionRuleId   = $centralDirectoryExclusion.RuleId
+                            ExclusionType     = $centralDirectoryExclusion.RuleType
+                            ExclusionCategory = $centralDirectoryExclusion.Category
+                            Application       = $centralDirectoryExclusion.Application
+                            Mandatory         = $centralDirectoryExclusion.Mandatory
+                        }
+
+                        Write-Info `
+                            -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
+
+                        continue
+                    }
+
+                    # Preserve configured/legacy exclusions from the copy engine.
                     if (
-                        Test-ProfMigExclusion `
+                        Test-ProfMigLegacyExclusion `
                             -RelativePath $relativeDirectory `
                             -Exclusions $Exclusions
                     ) {
@@ -613,9 +697,10 @@ function Copy-ProfMigComponent {
                         $filesExcluded++
 
                         $excludedItems += [PSCustomObject]@{
-                            Component  = $Component
-                            SourceFile = $child.FullName
-                            Reason     = 'Excluded directory by migration rule'
+                            Component    = $Component
+                            SourceFile   = $child.FullName
+                            RelativePath = $relativeDirectory
+                            Reason       = 'Excluded directory by migration rule'
                         }
 
                         continue
@@ -657,6 +742,34 @@ function Copy-ProfMigComponent {
                 $destinationFile = Join-Path `
                     -Path $DestinationPath `
                     -ChildPath $relativePath
+
+                $centralFileExclusion = Test-ProfMigExclusion `
+                    -RelativePath $relativePath `
+                    -Application $Component
+
+                if ($centralFileExclusion.Excluded) {
+
+                    $filesSelected++
+                    $filesExcluded++
+
+                    $excludedItems += [PSCustomObject]@{
+                        Component         = $Component
+                        SourceFile        = $child.FullName
+                        DestinationFile   = $destinationFile
+                        RelativePath      = $relativePath
+                        Reason            = $centralFileExclusion.Reason
+                        ExclusionRuleId   = $centralFileExclusion.RuleId
+                        ExclusionType     = $centralFileExclusion.RuleType
+                        ExclusionCategory = $centralFileExclusion.Category
+                        Application       = $centralFileExclusion.Application
+                        Mandatory         = $centralFileExclusion.Mandatory
+                    }
+
+                    Write-Info `
+                        -Message "Excluded [$($centralFileExclusion.Category)] rule $($centralFileExclusion.RuleId): $relativePath - $($centralFileExclusion.Reason)"
+
+                    continue
+                }
 
                 $fileResult = Copy-ProfMigSingleFile `
                     -Component $Component `
@@ -1081,23 +1194,18 @@ function Invoke-ProfMigFileCopy {
             Component       = $Component
             SourcePath      = $SourceFile
             DestinationPath = $DestinationFile
-
             StartedAt       = $startedAt
             CompletedAt     = $completedAt
             Duration        = ($completedAt - $startedAt)
-
             FilesSelected   = 1
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 1
             BytesCopied     = [int64]0
-
             Status          = 'Failed'
-
             SkippedItems    = @()
             ExcludedItems   = @()
-
             Errors          = @(
                 New-ProfMigCopyError `
                     -Component $Component `
@@ -1109,7 +1217,6 @@ function Invoke-ProfMigFileCopy {
     }
 
     try {
-
         $sourceItem = Get-Item `
             -LiteralPath $SourceFile `
             -Force `
@@ -1123,23 +1230,18 @@ function Invoke-ProfMigFileCopy {
             Component       = $Component
             SourcePath      = $SourceFile
             DestinationPath = $DestinationFile
-
             StartedAt       = $startedAt
             CompletedAt     = $completedAt
             Duration        = ($completedAt - $startedAt)
-
             FilesSelected   = 1
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 1
             BytesCopied     = [int64]0
-
             Status          = 'Failed'
-
             SkippedItems    = @()
             ExcludedItems   = @()
-
             Errors          = @(
                 New-ProfMigCopyError `
                     -Component $Component `
@@ -1150,11 +1252,57 @@ function Invoke-ProfMigFileCopy {
         }
     }
 
+    $relativePath = $sourceItem.Name
+
+    $exclusionResult = Test-ProfMigExclusion `
+        -RelativePath $relativePath `
+        -Application $Component
+
+    if ($exclusionResult.Excluded) {
+
+        $completedAt = Get-Date
+
+        $excludedItem = [PSCustomObject]@{
+            Component         = $Component
+            SourceFile        = $SourceFile
+            DestinationFile   = $DestinationFile
+            RelativePath      = $relativePath
+            Reason            = $exclusionResult.Reason
+            ExclusionRuleId   = $exclusionResult.RuleId
+            ExclusionType     = $exclusionResult.RuleType
+            ExclusionCategory = $exclusionResult.Category
+            Application       = $exclusionResult.Application
+            Mandatory         = $exclusionResult.Mandatory
+        }
+
+        Write-Info `
+            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+
+        return [PSCustomObject]@{
+            Component       = $Component
+            SourcePath      = $SourceFile
+            DestinationPath = $DestinationFile
+            StartedAt       = $startedAt
+            CompletedAt     = $completedAt
+            Duration        = ($completedAt - $startedAt)
+            FilesSelected   = 1
+            FilesCopied     = 0
+            FilesSkipped    = 0
+            FilesExcluded   = 1
+            FilesFailed     = 0
+            BytesCopied     = [int64]0
+            Status          = 'Success'
+            SkippedItems    = @()
+            ExcludedItems   = @($excludedItem)
+            Errors          = @()
+        }
+    }
+
     $fileResult = Copy-ProfMigSingleFile `
         -Component $Component `
         -File $sourceItem `
         -DestinationFile $DestinationFile `
-        -RelativePath $sourceItem.Name `
+        -RelativePath $relativePath `
         -Exclusions @()
 
     if ($fileResult.Failed -gt 0) {
@@ -1170,13 +1318,16 @@ function Invoke-ProfMigFileCopy {
     $completedAt = Get-Date
 
     $skippedItems = @()
-
     if ($null -ne $fileResult.SkippedItem) {
         $skippedItems += $fileResult.SkippedItem
     }
 
-    $errors = @()
+    $excludedItems = @()
+    if ($null -ne $fileResult.ExcludedItem) {
+        $excludedItems += $fileResult.ExcludedItem
+    }
 
+    $errors = @()
     if ($null -ne $fileResult.Error) {
         $errors += $fileResult.Error
     }
@@ -1185,22 +1336,18 @@ function Invoke-ProfMigFileCopy {
         Component       = $Component
         SourcePath      = $SourceFile
         DestinationPath = $DestinationFile
-
         StartedAt       = $startedAt
         CompletedAt     = $completedAt
         Duration        = ($completedAt - $startedAt)
-
         FilesSelected   = 1
         FilesCopied     = $fileResult.Copied
         FilesSkipped    = $fileResult.Skipped
-        FilesExcluded   = 0
+        FilesExcluded   = $fileResult.Excluded
         FilesFailed     = $fileResult.Failed
         BytesCopied     = $fileResult.BytesCopied
-
         Status          = $status
-
         SkippedItems    = @($skippedItems)
-        ExcludedItems   = @()
+        ExcludedItems   = @($excludedItems)
         Errors          = @($errors)
     }
 }

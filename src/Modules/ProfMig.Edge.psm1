@@ -260,13 +260,51 @@ function Get-ProfMigEdgeProfileData {
             $EdgeProfilePath `
             $definition.Path
 
+        $exists = Test-Path -LiteralPath $fullPath
+        $category = $definition.Category
+        $migrate = $definition.Migrate
+        $reason = $definition.Reason
+
+        $exclusionRuleId = $null
+        $exclusionType = $null
+        $exclusionCategory = $null
+        $mandatory = $false
+
+        if ($exists -and $definition.Category -eq 'Sensitive') {
+
+            $item = Get-Item `
+                -LiteralPath $fullPath `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+            $exclusionResult = Test-ProfMigExclusion `
+                -RelativePath $definition.Path `
+                -Application 'Edge' `
+                -IsDirectory:($item -and $item.PSIsContainer)
+
+            if ($exclusionResult.Excluded) {
+                $category = 'Sensitive'
+                $migrate = $false
+                $reason = $exclusionResult.Reason
+
+                $exclusionRuleId = $exclusionResult.RuleId
+                $exclusionType = $exclusionResult.RuleType
+                $exclusionCategory = $exclusionResult.Category
+                $mandatory = $exclusionResult.Mandatory
+            }
+        }
+
         [PSCustomObject]@{
-            Name     = $definition.Name
-            Path     = $fullPath
-            Exists   = Test-Path -LiteralPath $fullPath
-            Category = $definition.Category
-            Migrate  = $definition.Migrate
-            Reason   = $definition.Reason
+            Name              = $definition.Name
+            Path              = $fullPath
+            Exists            = $exists
+            Category          = $category
+            Migrate           = $migrate
+            Reason            = $reason
+            ExclusionRuleId   = $exclusionRuleId
+            ExclusionType     = $exclusionType
+            ExclusionCategory = $exclusionCategory
+            Mandatory         = $mandatory
         }
     }
 }
