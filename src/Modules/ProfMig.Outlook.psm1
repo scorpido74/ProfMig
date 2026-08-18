@@ -110,14 +110,29 @@ function Get-ProfMigOutlookFiles {
 
         foreach ($file in $ostFiles) {
 
+            $relativePath = $file.FullName.Substring($ProfilePath.Length).TrimStart('\')
+
+            $exclusionResult = Test-ProfMigExclusion `
+                -RelativePath $relativePath `
+                -Application 'Outlook'
+
             $items += [PSCustomObject]@{
-                Type          = "OST"
-                Name          = $file.Name
-                Path          = $file.FullName
-                SizeBytes     = $file.Length
-                Classification = "Recreate"
-                Action        = "Exclude"
-                Reason        = "OST mailbox cache should be recreated by Outlook."
+                Type              = "OST"
+                Name              = $file.Name
+                Path              = $file.FullName
+                SizeBytes         = $file.Length
+                Classification    = "Recreate"
+                Action            = if ($exclusionResult.Excluded) { "Exclude" } else { "Review" }
+                Reason            = if ($exclusionResult.Excluded) {
+                    $exclusionResult.Reason
+                }
+                else {
+                    "OST exclusion rule was not matched; manual review required."
+                }
+                ExclusionRuleId   = $exclusionResult.RuleId
+                ExclusionType     = $exclusionResult.RuleType
+                ExclusionCategory = $exclusionResult.Category
+                Mandatory         = $exclusionResult.Mandatory
             }
         }
 
@@ -142,6 +157,10 @@ function Get-ProfMigOutlookFiles {
                 Classification = "Portable"
                 Action        = "Migrate"
                 Reason        = "PST is portable Outlook user data."
+                ExclusionRuleId   = $null
+                ExclusionType     = $null
+                ExclusionCategory = $null
+                Mandatory         = $false
             }
         }
     }
@@ -169,6 +188,10 @@ function Get-ProfMigOutlookFiles {
                 Classification = "Portable"
                 Action        = "Migrate"
                 Reason        = "PST is portable Outlook user data."
+                ExclusionRuleId   = $null
+                ExclusionType     = $null
+                ExclusionCategory = $null
+                Mandatory         = $false
             }
         }
     }
