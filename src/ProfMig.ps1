@@ -211,10 +211,11 @@ try {
 
     Write-Info 'Starting interactive menu.'
 
-   $null = Start-ProfMigMenu `
-    -Configuration $Config `
-    -Profiles $Profiles `
-    -ReportFolder $ReportFolder
+    $null = Start-ProfMigMenu `
+        -Configuration $Config `
+        -Profiles $Profiles `
+        -ReportFolder $ReportFolder `
+        -ApplicationDefinitions $ApplicationDefinitions
 
     # -------------------------------------------------------------------------
     # Shutdown

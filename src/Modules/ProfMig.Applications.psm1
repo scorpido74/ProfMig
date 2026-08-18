@@ -771,5 +771,388 @@ function Get-ProfMigOutlook {
     }
 }
 
+function Invoke-ProfMigSelectedApplicationMigration {
 
-Export-ModuleMember -Function Get-ProfMigApplications
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [object[]]$Applications,
+
+        [Parameter(Mandatory)]
+        [string]$SourceProfile,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationProfile
+    )
+
+    $startedAt = Get-Date
+    $results = @()
+
+    Write-Info (
+        "Starting application migration. " +
+        "Selected applications: $($Applications.Count)."
+    )
+
+    foreach ($application in $Applications) {
+
+        $applicationStartedAt = Get-Date
+
+        Write-Info (
+            "Starting application migration: " +
+            "'$($application.Name)'."
+        )
+
+        try {
+
+            $migrationResult = $null
+
+            # -------------------------------------------------------------
+            # Native application providers
+            # -------------------------------------------------------------
+
+            if ($application.Type -eq 'Native') {
+
+                switch ($application.Id) {
+
+                    'Microsoft.Edge' {
+
+                        $migrationResult = Invoke-ProfMigEdgeMigration `
+                            -SourceProfile $SourceProfile `
+                            -DestinationProfile $DestinationProfile
+                    }
+
+                    'Google.Chrome' {
+
+                        $migrationResult = Invoke-ProfMigChromeMigration `
+                            -SourceProfile $SourceProfile `
+                            -DestinationProfile $DestinationProfile
+                    }
+
+                    'Microsoft.Outlook' {
+
+                        $migrationResult = Invoke-ProfMigOutlookMigration `
+                            -SourceProfilePath $SourceProfile `
+                            -DestinationProfilePath $DestinationProfile
+                    }
+
+                    default {
+
+                        throw (
+                            "No migration provider is registered for " +
+                            "application '$($application.Name)' " +
+                            "with id '$($application.Id)'."
+                        )
+                    }
+                }
+            }
+
+            # -------------------------------------------------------------
+            # Generic application provider
+            # -------------------------------------------------------------
+
+            elseif ($application.Type -eq 'Generic') {
+
+                if ($null -eq $application.Definition) {
+
+                    throw (
+                        "Application '$($application.Name)' does not contain " +
+                        "a valid application definition."
+                    )
+                }
+
+                $migrationResult = Invoke-ProfMigApplicationMigration `
+                    -Definition $application.Definition `
+                    -SourceProfile $SourceProfile `
+                    -DestinationProfile $DestinationProfile
+            }
+
+            else {
+
+                throw (
+                    "Unsupported application provider type " +
+                    "'$($application.Type)' for '$($application.Name)'."
+                )
+            }
+
+            # -------------------------------------------------------------
+            # Normalize status
+            # -------------------------------------------------------------
+
+            $providerStatus = [string]$migrationResult.Status
+
+            $normalizedStatus = switch ($providerStatus) {
+
+                'Success' {
+                    'Success'
+                }
+
+                'Completed' {
+                    'Success'
+                }
+
+                'CompletedWithWarnings' {
+                    'Warning'
+                }
+
+                'CompletedWithErrors' {
+                    'Failed'
+                }
+
+                'Blocked' {
+                    'Failed'
+                }
+
+                'NotDetected' {
+                    'Skipped'
+                }
+
+                'NothingToMigrate' {
+                    'Skipped'
+                }
+
+                'Skipped' {
+                    'Skipped'
+                }
+
+                default {
+
+                    if (
+                        $migrationResult.PSObject.Properties.Name -contains
+                        'FilesFailed' -and
+                        [int]$migrationResult.FilesFailed -gt 0
+                    ) {
+                        'Failed'
+                    }
+                    else {
+                        'Warning'
+                    }
+                }
+            }
+
+            $applicationCompletedAt = Get-Date
+
+            $results += [PSCustomObject]@{
+                Id              = $application.Id
+                Name            = $application.Name
+                Type            = $application.Type
+
+                Status          = $normalizedStatus
+                ProviderStatus  = $providerStatus
+
+                StartedAt       = $applicationStartedAt
+                CompletedAt     = $applicationCompletedAt
+                Duration        = (
+                    $applicationCompletedAt -
+                    $applicationStartedAt
+                )
+
+                FilesCopied     = if (
+                    $migrationResult.PSObject.Properties.Name -contains
+                    'FilesCopied'
+                ) {
+                    [int]$migrationResult.FilesCopied
+                }
+                else {
+                    0
+                }
+
+                FilesFailed     = if (
+                    $migrationResult.PSObject.Properties.Name -contains
+                    'FilesFailed'
+                ) {
+                    [int]$migrationResult.FilesFailed
+                }
+                else {
+                    0
+                }
+
+                Error           = $null
+                Result          = $migrationResult
+            }
+
+            switch ($normalizedStatus) {
+
+                'Success' {
+
+                    Write-Success (
+                        "Application migration completed: " +
+                        "'$($application.Name)'."
+                    )
+                }
+
+                'Skipped' {
+
+                    Write-Warning (
+                        "Application migration skipped: " +
+                        "'$($application.Name)' " +
+                        "($providerStatus)."
+                    )
+                }
+
+                'Warning' {
+
+                    Write-Warning (
+                        "Application migration completed with warnings: " +
+                        "'$($application.Name)' " +
+                        "($providerStatus)."
+                    )
+                }
+
+                'Failed' {
+
+                    Write-Warning (
+                        "Application migration completed with errors: " +
+                        "'$($application.Name)' " +
+                        "($providerStatus)."
+                    )
+                }
+            }
+        }
+        catch {
+
+            $applicationCompletedAt = Get-Date
+
+            $results += [PSCustomObject]@{
+                Id              = $application.Id
+                Name            = $application.Name
+                Type            = $application.Type
+
+                Status          = 'Failed'
+                ProviderStatus  = 'Exception'
+
+                StartedAt       = $applicationStartedAt
+                CompletedAt     = $applicationCompletedAt
+                Duration        = (
+                    $applicationCompletedAt -
+                    $applicationStartedAt
+                )
+
+                FilesCopied     = 0
+                FilesFailed     = 0
+
+                Error           = $_.Exception.Message
+                Result          = $null
+            }
+
+            Write-Warning (
+                "Application migration failed for " +
+                "'$($application.Name)': " +
+                "$($_.Exception.Message)"
+            )
+
+            # IMPORTANT:
+            # Do not throw here.
+            # Failure of one application must not stop the remaining
+            # application migrations.
+        }
+    }
+
+    $completedAt = Get-Date
+
+    $successCount = @(
+        $results |
+            Where-Object Status -eq 'Success'
+    ).Count
+
+    $warningCount = @(
+        $results |
+            Where-Object Status -eq 'Warning'
+    ).Count
+
+    $failedCount = @(
+        $results |
+            Where-Object Status -eq 'Failed'
+    ).Count
+
+    $skippedCount = @(
+        $results |
+            Where-Object Status -eq 'Skipped'
+    ).Count
+
+    # ---------------------------------------------------------------------
+    # Determine overall application migration status
+    # ---------------------------------------------------------------------
+
+    if ($results.Count -eq 0) {
+
+        $overallStatus = 'NothingSelected'
+    }
+    elseif ($failedCount -eq $results.Count) {
+
+        $overallStatus = 'Failed'
+    }
+    elseif ($failedCount -gt 0) {
+
+        $overallStatus = 'PartialSuccess'
+    }
+    elseif ($warningCount -gt 0) {
+
+        $overallStatus = 'CompletedWithWarnings'
+    }
+    elseif ($successCount -gt 0) {
+
+        $overallStatus = 'Success'
+    }
+    else {
+
+        $overallStatus = 'Skipped'
+    }
+
+    $totalFilesCopied = (
+        $results |
+            Measure-Object `
+                -Property FilesCopied `
+                -Sum
+    ).Sum
+
+    $totalFilesFailed = (
+        $results |
+            Measure-Object `
+                -Property FilesFailed `
+                -Sum
+    ).Sum
+
+    if ($null -eq $totalFilesCopied) {
+        $totalFilesCopied = 0
+    }
+
+    if ($null -eq $totalFilesFailed) {
+        $totalFilesFailed = 0
+    }
+
+    Write-Info (
+        "Application migration completed. " +
+        "Status: $overallStatus; " +
+        "Success: $successCount; " +
+        "Warnings: $warningCount; " +
+        "Failed: $failedCount; " +
+        "Skipped: $skippedCount."
+    )
+
+    return [PSCustomObject]@{
+        StartedAt          = $startedAt
+        CompletedAt        = $completedAt
+        Duration           = ($completedAt - $startedAt)
+
+        SourceProfile      = $SourceProfile
+        DestinationProfile = $DestinationProfile
+
+        Status             = $overallStatus
+
+        ApplicationsTotal  = $results.Count
+        ApplicationsSuccess = $successCount
+        ApplicationsWarning = $warningCount
+        ApplicationsFailed = $failedCount
+        ApplicationsSkipped = $skippedCount
+
+        FilesCopied        = [int64]$totalFilesCopied
+        FilesFailed        = [int64]$totalFilesFailed
+
+        Results            = @($results)
+    }
+}
+
+Export-ModuleMember -Function @(
+    'Get-ProfMigApplications'
+    'Invoke-ProfMigSelectedApplicationMigration'
+)
