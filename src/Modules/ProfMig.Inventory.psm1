@@ -208,7 +208,10 @@ function Get-UserProfiles {
             Documents = 'Documents'
             Downloads = 'Downloads'
             Pictures  = 'Pictures'
+            Music     = 'Music'
+            Videos    = 'Videos'
             Favorites = 'Favorites'
+            Links     = 'Links'
             AppData   = 'AppData'
         }
 
@@ -340,5 +343,189 @@ function Get-UserProfiles {
     return $inventory
 }
 
+function Get-ProfMigApplicationInventory {
 
-Export-ModuleMember -Function Get-UserProfiles
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$SourceProfilePath,
+
+        [Parameter(Mandatory = $false)]
+        [object[]]$ApplicationDefinitions = @()
+    )
+
+    Write-Verbose "Building application inventory for source profile: $SourceProfilePath"
+
+    $applicationInventory = @()
+
+    # ---------------------------------------------------------
+    # Native application providers
+    # ---------------------------------------------------------
+
+    $nativeApplications = @(
+        @{
+            Id                = 'Microsoft.Edge'
+            Name              = 'Microsoft Edge'
+            DetectionFunction = 'Get-ProfMigEdgeDetection'
+            MigrationFunction = 'Invoke-ProfMigEdgeMigration'
+        },
+        @{
+            Id                = 'Google.Chrome'
+            Name              = 'Google Chrome'
+            DetectionFunction = 'Get-ProfMigChromeDetection'
+            MigrationFunction = 'Invoke-ProfMigChromeMigration'
+        },
+        @{
+            Id                = 'Microsoft.Outlook'
+            Name              = 'Microsoft Outlook'
+            DetectionFunction = 'Get-ProfMigOutlookDetection'
+            MigrationFunction = 'Invoke-ProfMigOutlookMigration'
+        }
+    )
+
+    foreach ($application in $nativeApplications) {
+
+        try {
+
+            $detectionCommand = Get-Command `
+                -Name $application.DetectionFunction `
+                -ErrorAction SilentlyContinue
+
+            if (-not $detectionCommand) {
+
+                $applicationInventory += [PSCustomObject]@{
+                    Id                = $application.Id
+                    Name              = $application.Name
+                    Type              = 'Native'
+                    Detected          = $false
+                    Status            = 'ProviderUnavailable'
+                    Detection         = $null
+                    Definition        = $null
+                    DetectionFunction = $application.DetectionFunction
+                    MigrationFunction = $application.MigrationFunction
+                    Error             = "Detection provider '$($application.DetectionFunction)' is not available."
+                }
+
+                continue
+            }
+
+            $detectionResult = & $application.DetectionFunction `
+                -ProfilePath $SourceProfilePath
+
+            $detected = [bool]$detectionResult.Detected
+
+            $applicationInventory += [PSCustomObject]@{
+                Id                = $application.Id
+                Name              = $application.Name
+                Type              = 'Native'
+                Detected          = $detected
+                Status            = if ($detected) {
+                    'Detected'
+                }
+                else {
+                    'NotDetected'
+                }
+                Detection         = $detectionResult
+                Definition        = $null
+                DetectionFunction = $application.DetectionFunction
+                MigrationFunction = $application.MigrationFunction
+                Error             = $null
+            }
+        }
+        catch {
+
+            $applicationInventory += [PSCustomObject]@{
+                Id                = $application.Id
+                Name              = $application.Name
+                Type              = 'Native'
+                Detected          = $false
+                Status            = 'DetectionFailed'
+                Detection         = $null
+                Definition        = $null
+                DetectionFunction = $application.DetectionFunction
+                MigrationFunction = $application.MigrationFunction
+                Error             = $_.Exception.Message
+            }
+
+            Write-Warning "Application detection failed for '$($application.Name)': $($_.Exception.Message)"
+        }
+    }
+
+    # ---------------------------------------------------------
+    # Generic application definitions
+    # ---------------------------------------------------------
+
+    foreach ($definitionResult in $ApplicationDefinitions) {
+
+        if (-not $definitionResult.Valid) {
+
+            $applicationInventory += [PSCustomObject]@{
+                Id                = $null
+                Name              = [System.IO.Path]::GetFileNameWithoutExtension($definitionResult.File)
+                Type              = 'Generic'
+                Detected          = $false
+                Status            = 'InvalidDefinition'
+                Detection         = $null
+                Definition        = $definitionResult.Definition
+                DetectionFunction = 'Test-ProfMigApplicationDetection'
+                MigrationFunction = 'Invoke-ProfMigApplicationMigration'
+                Error             = ($definitionResult.Errors -join '; ')
+            }
+
+            continue
+        }
+
+        $definition = $definitionResult.Definition
+
+        try {
+
+        $detectionResult = Test-ProfMigApplicationDetection `
+            -Definition $definition `
+            -ProfilePath $SourceProfilePath
+
+            $detected = [bool]$detectionResult.Detected
+
+            $applicationInventory += [PSCustomObject]@{
+                Id                = $definition.Application.Id
+                Name              = $definition.Application.Name
+                Type              = 'Generic'
+                Detected          = $detected
+                Status            = if ($detected) {
+                    'Detected'
+                }
+                else {
+                    'NotDetected'
+                }
+                Detection         = $detectionResult
+                Definition        = $definition
+                DetectionFunction = 'Test-ProfMigApplicationDetection'
+                MigrationFunction = 'Invoke-ProfMigApplicationMigration'
+                Error             = $null
+            }
+        }
+        catch {
+
+            $applicationInventory += [PSCustomObject]@{
+                Id                = $definition.Application.Id
+                Name              = $definition.Application.Name
+                Type              = 'Generic'
+                Detected          = $false
+                Status            = 'DetectionFailed'
+                Detection         = $null
+                Definition        = $definition
+                DetectionFunction = 'Test-ProfMigApplicationDetection'
+                MigrationFunction = 'Invoke-ProfMigApplicationMigration'
+                Error             = $_.Exception.Message
+            }
+
+            Write-Warning "Application detection failed for '$($definition.Application.Name)': $($_.Exception.Message)"
+        }
+    }
+
+    return $applicationInventory
+}
+
+Export-ModuleMember -Function @(
+    'Get-UserProfiles',
+    'Get-ProfMigApplicationInventory'
+)
