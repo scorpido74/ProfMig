@@ -36,19 +36,6 @@ Import-Module `
 
 Initialize-ProfMigDefaultExclusions
 
-$loggingModulePath = Join-Path `
-    -Path $PSScriptRoot `
-    -ChildPath 'ProfMig.Logging.psm1'
-
-if (-not (Test-Path -LiteralPath $loggingModulePath)) {
-    throw "ProfMig logging module not found: $loggingModulePath"
-}
-
-Import-Module `
-    -Name $loggingModulePath `
-    -Force `
-    -ErrorAction Stop
-
 # ---------------------------------------------------------------------------
 # Internal function: Test-ProfMigLegacyExclusion
 # ---------------------------------------------------------------------------
