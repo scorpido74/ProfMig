@@ -4,7 +4,7 @@
 
 ### Professional Windows Profile Migration Toolkit
 
-<img src="assets/infinigate-logo.png" alt="Infinigate" width="180">
+<img src="asstes/Infinigate-TechServices-logo.png" alt="Infinigate" width="220">
 
 **Powered by Infinigate**
 
