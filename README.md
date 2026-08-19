@@ -1,4 +1,24 @@
+<div align="center">
+
 # ProfMig
+
+### Professional Windows Profile Migration Toolkit
+
+<img src="assets/infinigate-logo.png" alt="Infinigate" width="180">
+
+**Powered by Infinigate**
+
+</div>
+
+<div align="center">
+
+[![Release](https://img.shields.io/github/v/release/scorpido74/ProfMig?include_prereleases&sort=semver)](https://github.com/scorpido74/ProfMig/releases)
+[![Build](https://github.com/scorpido74/ProfMig/actions/workflows/validate.yml/badge.svg)](https://github.com/scorpido74/ProfMig/actions)
+[![Issues](https://img.shields.io/github/issues/scorpido74/ProfMig)](https://github.com/scorpido74/ProfMig/issues)
+[![License](https://img.shields.io/github/license/scorpido74/ProfMig)](LICENSE)
+
+</div>
+
 
 Professional Windows Profile Migration Toolkit
 
