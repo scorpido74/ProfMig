@@ -34,6 +34,19 @@ Import-Module `
     -Force `
     -ErrorAction Stop
 
+$validationModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Validation.psm1'
+
+if (-not (Test-Path -LiteralPath $validationModulePath)) {
+    throw "ProfMig validation module not found: $validationModulePath"
+}
+
+Import-Module `
+    -Name $validationModulePath `
+    -Force `
+    -ErrorAction Stop
+
 Initialize-ProfMigDefaultExclusions
 
 # ---------------------------------------------------------------------------
@@ -878,61 +891,55 @@ function Invoke-ProfMigCopy {
     $migrationStartedAt = Get-Date
 
     # -----------------------------------------------------------------------
-    # Validate profiles
+    # Sprint 3.1 - Central pre-migration validation
+    #
+    # This is the mandatory gate before any migration data is copied.
+    # Validation owns the profile, accessibility, privilege, configuration,
+    # destination write and storage checks. Do not duplicate those checks here.
     # -----------------------------------------------------------------------
 
-    if (
-        -not (
-            Test-Path `
-                -LiteralPath $SourceProfile `
-                -PathType Container
-        )
-    ) {
-        throw "Source profile does not exist: $SourceProfile"
-    }
+    $validation = Invoke-ProfMigPreMigrationValidation `
+        -SourceProfile $SourceProfile `
+        -DestinationProfile $DestinationProfile `
+        -Configuration $Configuration `
+        -RequiredConfigurationProperties @('Folders')
 
-    if (
-        -not (
-            Test-Path `
-                -LiteralPath $DestinationProfile `
-                -PathType Container
-        )
-    ) {
-        throw "Destination profile does not exist: $DestinationProfile"
+    Assert-ProfMigMigrationAllowed `
+        -ValidationSummary $validation | Out-Null
+
+    # Validation may allow a destination profile that does not yet exist.
+    # The copy engine needs the profile root before component directories can
+    # be created, so create it only after the validation gate has passed.
+    if (-not (Test-Path -LiteralPath $DestinationProfile -PathType Container)) {
+        New-Item `
+            -Path $DestinationProfile `
+            -ItemType Directory `
+            -Force `
+            -ErrorAction Stop |
+            Out-Null
     }
 
     $resolvedSource = (
-        Resolve-Path -LiteralPath $SourceProfile
+        Resolve-Path -LiteralPath $SourceProfile -ErrorAction Stop
     ).Path.TrimEnd('\')
 
     $resolvedDestination = (
-        Resolve-Path -LiteralPath $DestinationProfile
+        Resolve-Path -LiteralPath $DestinationProfile -ErrorAction Stop
     ).Path.TrimEnd('\')
 
-    if ($resolvedSource -ieq $resolvedDestination) {
-        throw 'Source and destination profiles cannot be the same.'
-    }
-
     # -----------------------------------------------------------------------
-    # Read configuration
+    # Read migration configuration
     # -----------------------------------------------------------------------
-
-    if (
-        -not $Configuration.ContainsKey('Folders') -or
-        $null -eq $Configuration.Folders
-    ) {
-        throw "Migration configuration must contain a 'Folders' entry."
-    }
 
     $supportedFolders = @(
-            'Desktop'
-            'Documents'
-            'Downloads'
-            'Pictures'
-            'Music'
-            'Videos'
-            'Favorites'
-            'Links'
+        'Desktop'
+        'Documents'
+        'Downloads'
+        'Pictures'
+        'Music'
+        'Videos'
+        'Favorites'
+        'Links'
     )
 
     $selectedFolders = @($Configuration.Folders)
@@ -1137,6 +1144,7 @@ function Invoke-ProfMigCopy {
 
         Status             = $overallStatus
 
+        Validation         = $validation
         Totals             = $totals
         Components         = @($components)
 
