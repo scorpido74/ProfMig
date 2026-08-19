@@ -23,6 +23,22 @@
     - PST files are never modified.
 #>
 
+Set-StrictMode -Version Latest
+
+$exclusionModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Exclusions.psm1'
+
+if (-not (Test-Path -LiteralPath $exclusionModulePath)) {
+    throw "ProfMig exclusions module not found: $exclusionModulePath"
+}
+
+Import-Module `
+    -Name $exclusionModulePath `
+    -Force `
+    -ErrorAction Stop
+
+Initialize-ProfMigDefaultExclusions
 
 function Write-ProfMigOutlookLog {
     [CmdletBinding()]
