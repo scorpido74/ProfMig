@@ -6,10 +6,10 @@
     Performs all required validation checks before ProfMig is allowed
     to start copying or modifying migration data.
 
-    Validation is read-only for the source profile.
+    Validation is non-destructive for both source and destination profiles.
 
-    The destination write test creates a temporary file in the destination
-    and immediately removes it.
+    Windows profile identity and registration checks are provided by
+    ProfMig.ProfileValidation.psm1.
 
     All validation functions return structured PowerShell objects so the
     results can be consumed by:
@@ -22,7 +22,7 @@
 .NOTES
     Module  : ProfMig.Validation.psm1
     Project : ProfMig
-    Sprint  : 3.1 - Pre-Migration Validation
+    Sprint  : 3.2 - Profile & Privilege Validation
 #>
 
 Set-StrictMode -Version Latest
@@ -42,6 +42,25 @@ $script:DefaultDiskSpaceBufferPercent = 10
 # When available space is sufficient, but remaining capacity after migration
 # falls below this percentage, return a warning.
 $script:DefaultDiskSpaceWarningPercent = 15
+
+
+# ============================================================================
+# Sprint 3.2 profile validation dependency
+# ============================================================================
+
+$profileValidationModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.ProfileValidation.psm1'
+
+if (-not (Test-Path -LiteralPath $profileValidationModulePath -PathType Leaf)) {
+    throw "Required ProfMig profile validation module was not found: $profileValidationModulePath"
+}
+
+Import-Module `
+    -Name $profileValidationModulePath `
+    -Force `
+    -ErrorAction Stop
+
 
 
 # ============================================================================
@@ -144,7 +163,7 @@ function Get-ProfMigDirectorySize {
         [string]$Path
     )
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Container -ErrorAction SilentlyContinue)) {
         throw "Directory does not exist: $Path"
     }
 
@@ -278,6 +297,135 @@ function Test-ProfMigIsAdministrator {
 }
 
 
+
+function Test-ProfMigIdentityMatch {
+    <#
+    .SYNOPSIS
+        Compares a selected user value with a resolved Windows profile identity.
+
+    .DESCRIPTION
+        The selected user may be supplied as SID, account name or qualified
+        account name. Folder names are not used as account identities.
+    #>
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateSet('Source', 'Destination')]
+        [string]$Role,
+
+        [Parameter()]
+        [AllowNull()]
+        [string]$SelectedUser,
+
+        [Parameter()]
+        [AllowNull()]
+        [object]$Identity
+    )
+
+    $checkName = "${Role}ProfileIdentity"
+
+    if ([string]::IsNullOrWhiteSpace($SelectedUser)) {
+
+        return New-ProfMigValidationResult `
+            -Check $checkName `
+            -Status 'Passed' `
+            -Severity 'Information' `
+            -Message "$Role user identity matching was not requested." `
+            -Details @{
+                Role         = $Role
+                SelectedUser = $SelectedUser
+            }
+    }
+
+    if (
+        $null -eq $Identity -or
+        [string]::IsNullOrWhiteSpace([string]$Identity.SID)
+    ) {
+
+        return New-ProfMigValidationResult `
+            -Check $checkName `
+            -Status 'Warning' `
+            -Severity 'Warning' `
+            -Message "$Role profile identity could not be resolved well enough to confirm the selected user." `
+            -Details @{
+                Role         = $Role
+                SelectedUser = $SelectedUser
+                Identity     = $Identity
+            }
+    }
+
+    $candidates = @(
+        [string]$Identity.SID,
+        [string]$Identity.AccountName,
+        [string]$Identity.QualifiedName
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_)
+    }
+
+    $matched = @(
+        $candidates |
+        Where-Object {
+            $_ -ieq $SelectedUser
+        }
+    ).Count -gt 0
+
+    if ($matched) {
+
+        return New-ProfMigValidationResult `
+            -Check $checkName `
+            -Status 'Passed' `
+            -Severity 'Critical' `
+            -Message "$Role profile identity matches the selected user." `
+            -Details @{
+                Role          = $Role
+                SelectedUser  = $SelectedUser
+                SID           = $Identity.SID
+                AccountName   = $Identity.AccountName
+                QualifiedName = $Identity.QualifiedName
+                AccountType   = $Identity.AccountType
+            }
+    }
+
+    return New-ProfMigValidationResult `
+        -Check $checkName `
+        -Status 'Failed' `
+        -Severity 'Critical' `
+        -Message "$Role profile identity does not match the selected user." `
+        -Details @{
+            Role          = $Role
+            SelectedUser  = $SelectedUser
+            SID           = $Identity.SID
+            AccountName   = $Identity.AccountName
+            QualifiedName = $Identity.QualifiedName
+            AccountType   = $Identity.AccountType
+        }
+}
+
+
+function Convert-ProfMigProfileCheckName {
+    <#
+    .SYNOPSIS
+        Assigns a role-specific check name to a profile validation result.
+    #>
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [object]$Result,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Check
+    )
+
+    $Result.Check = $Check
+    return $Result
+}
+
+
+
+
 # ============================================================================
 # Source validation
 # ============================================================================
@@ -296,7 +444,19 @@ function Test-ProfMigSourceProfile {
     )
 
     try {
-        if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+        if ($Path.StartsWith('\\')) {
+
+            return New-ProfMigValidationResult `
+                -Check 'SourceProfile' `
+                -Status 'Failed' `
+                -Severity 'Critical' `
+                -Message 'Source profile must be local. UNC paths are not supported.' `
+                -Details @{
+                    Path = $Path
+                }
+        }
+
+        if (-not (Test-Path -LiteralPath $Path -PathType Container -ErrorAction SilentlyContinue)) {
 
             return New-ProfMigValidationResult `
                 -Check 'SourceProfile' `
@@ -361,7 +521,19 @@ function Test-ProfMigSourceAccessibility {
         )
     )
 
-    if (-not (Test-Path -LiteralPath $Path -PathType Container)) {
+    if ($Path.StartsWith('\\')) {
+
+        return New-ProfMigValidationResult `
+            -Check 'SourceAccessibility' `
+            -Status 'Failed' `
+            -Severity 'Critical' `
+            -Message 'Source accessibility cannot be validated for a UNC path because ProfMig only supports local Windows profiles.' `
+            -Details @{
+                Path = $Path
+            }
+    }
+
+    if (-not (Test-Path -LiteralPath $Path -PathType Container -ErrorAction SilentlyContinue)) {
 
         return New-ProfMigValidationResult `
             -Check 'SourceAccessibility' `
@@ -380,7 +552,7 @@ function Test-ProfMigSourceAccessibility {
 
         $directoryPath = Join-Path $Path $directory
 
-        if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
+        if (-not (Test-Path -LiteralPath $directoryPath -PathType Container -ErrorAction SilentlyContinue)) {
             continue
         }
 
@@ -454,7 +626,7 @@ function Test-ProfMigDestinationProfile {
 
     try {
 
-        if (Test-Path -LiteralPath $Path -PathType Container) {
+        if (Test-Path -LiteralPath $Path -PathType Container -ErrorAction SilentlyContinue) {
 
             return New-ProfMigValidationResult `
                 -Check 'DestinationProfile' `
@@ -483,7 +655,7 @@ function Test-ProfMigDestinationProfile {
                 }
         }
 
-        if (-not (Test-Path -LiteralPath $parentPath -PathType Container)) {
+        if (-not (Test-Path -LiteralPath $parentPath -PathType Container -ErrorAction SilentlyContinue)) {
 
             return New-ProfMigValidationResult `
                 -Check 'DestinationProfile' `
@@ -524,15 +696,18 @@ function Test-ProfMigDestinationProfile {
 function Test-ProfMigDestinationWritable {
     <#
     .SYNOPSIS
-        Verifies write access to the destination.
+        Verifies write capability for the destination without modifying it.
 
     .DESCRIPTION
-        Creates a temporary validation file and immediately removes it.
+        Evaluates the NTFS ACL of the destination, or the nearest existing
+        parent directory when the destination does not yet exist.
 
-        If the destination profile does not yet exist, the test is performed
-        in its parent directory.
+        No temporary files or directories are created and no permissions
+        are changed.
 
-        No source data is modified.
+        The check evaluates the current Windows identity and its group SIDs.
+        Explicit and inherited deny entries that contain write-related rights
+        take precedence over allow entries.
     #>
 
     [CmdletBinding()]
@@ -542,63 +717,170 @@ function Test-ProfMigDestinationWritable {
         [string]$Path
     )
 
-    $testPath = $null
-
     try {
 
-        if (Test-Path -LiteralPath $Path -PathType Container) {
-            $writeTarget = $Path
+        $normalizedPath = Get-ProfMigNormalizedPath -Path $Path
+        $writeTarget = $normalizedPath
+
+        while (
+            -not [string]::IsNullOrWhiteSpace($writeTarget) -and
+            -not (Test-Path -LiteralPath $writeTarget -PathType Container -ErrorAction SilentlyContinue)
+        ) {
+            $parent = Split-Path -Path $writeTarget -Parent
+
+            if (
+                [string]::IsNullOrWhiteSpace($parent) -or
+                $parent -ieq $writeTarget
+            ) {
+                break
+            }
+
+            $writeTarget = $parent
         }
-        else {
 
-            $normalizedPath = Get-ProfMigNormalizedPath -Path $Path
+        if (
+            [string]::IsNullOrWhiteSpace($writeTarget) -or
+            -not (Test-Path -LiteralPath $writeTarget -PathType Container -ErrorAction SilentlyContinue)
+        ) {
 
-            $writeTarget = Split-Path -Path $normalizedPath -Parent
+            return New-ProfMigValidationResult `
+                -Check 'DestinationWritable' `
+                -Status 'Failed' `
+                -Severity 'Critical' `
+                -Message 'Destination write access cannot be validated because no existing parent directory is available.' `
+                -Details @{
+                    Path        = $normalizedPath
+                    WriteTarget = $writeTarget
+                    Method      = 'NTFS ACL'
+                }
+        }
 
-            if (-not (Test-Path -LiteralPath $writeTarget -PathType Container)) {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 
-                return New-ProfMigValidationResult `
-                    -Check 'DestinationWritable' `
-                    -Status 'Failed' `
-                    -Severity 'Critical' `
-                    -Message 'Destination write access cannot be tested because the destination parent directory does not exist.' `
-                    -Details @{
-                        Path        = $Path
-                        WriteTarget = $writeTarget
-                    }
+        $tokenSids = New-Object `
+            'System.Collections.Generic.HashSet[string]' `
+            -ArgumentList ([System.StringComparer]::OrdinalIgnoreCase)
+
+        if ($null -ne $identity.User) {
+            $null = $tokenSids.Add($identity.User.Value)
+        }
+
+        foreach ($groupSid in $identity.Groups) {
+            if ($null -ne $groupSid) {
+                $null = $tokenSids.Add($groupSid.Value)
             }
         }
 
-        $testFileName = '.profmig-validation-{0}.tmp' -f (
-            [Guid]::NewGuid().ToString('N')
+        $acl = Get-Acl -LiteralPath $writeTarget -ErrorAction Stop
+
+        $writeMask = (
+            [System.Security.AccessControl.FileSystemRights]::WriteData -bor
+            [System.Security.AccessControl.FileSystemRights]::AppendData -bor
+            [System.Security.AccessControl.FileSystemRights]::CreateFiles -bor
+            [System.Security.AccessControl.FileSystemRights]::CreateDirectories -bor
+            [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+            [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+            [System.Security.AccessControl.FileSystemRights]::Modify -bor
+            [System.Security.AccessControl.FileSystemRights]::FullControl
         )
 
-        $testPath = Join-Path $writeTarget $testFileName
+        $matchingRules = @()
+        $allowRules = @()
+        $denyRules = @()
 
-        [System.IO.File]::WriteAllText(
-            $testPath,
-            'ProfMig destination write validation'
-        )
+        foreach ($rule in $acl.Access) {
 
-        if (-not (Test-Path -LiteralPath $testPath -PathType Leaf)) {
-            throw 'Temporary validation file was not created successfully.'
+            try {
+                $ruleSid = $rule.IdentityReference.Translate(
+                    [System.Security.Principal.SecurityIdentifier]
+                ).Value
+            }
+            catch {
+                continue
+            }
+
+            if (-not $tokenSids.Contains($ruleSid)) {
+                continue
+            }
+
+            if (
+                ($rule.PropagationFlags -band [System.Security.AccessControl.PropagationFlags]::InheritOnly) -ne 0
+            ) {
+                continue
+            }
+
+            $rights = [System.Security.AccessControl.FileSystemRights]$rule.FileSystemRights
+            $hasWriteRights = (($rights -band $writeMask) -ne 0)
+
+            if (-not $hasWriteRights) {
+                continue
+            }
+
+            $ruleInfo = [PSCustomObject]@{
+                IdentityReference = $rule.IdentityReference.Value
+                AccessControlType = $rule.AccessControlType.ToString()
+                FileSystemRights  = $rule.FileSystemRights.ToString()
+                IsInherited       = [bool]$rule.IsInherited
+            }
+
+            $matchingRules += $ruleInfo
+
+            if (
+                $rule.AccessControlType -eq
+                [System.Security.AccessControl.AccessControlType]::Deny
+            ) {
+                $denyRules += $ruleInfo
+            }
+            else {
+                $allowRules += $ruleInfo
+            }
         }
 
-        Remove-Item `
-            -LiteralPath $testPath `
-            -Force `
-            -ErrorAction Stop
+        if ($denyRules.Count -gt 0) {
 
-        $testPath = $null
+            return New-ProfMigValidationResult `
+                -Check 'DestinationWritable' `
+                -Status 'Failed' `
+                -Severity 'Critical' `
+                -Message 'Destination ACL contains a write-related deny rule for the current security token.' `
+                -Details @{
+                    Path          = $normalizedPath
+                    WriteTarget   = $writeTarget
+                    Identity      = $identity.Name
+                    Method        = 'NTFS ACL'
+                    DenyRules     = $denyRules
+                    MatchingRules = $matchingRules
+                }
+        }
+
+        if ($allowRules.Count -gt 0) {
+
+            return New-ProfMigValidationResult `
+                -Check 'DestinationWritable' `
+                -Status 'Passed' `
+                -Severity 'Critical' `
+                -Message 'Destination ACL grants write-related access to the current security token.' `
+                -Details @{
+                    Path          = $normalizedPath
+                    WriteTarget   = $writeTarget
+                    Identity      = $identity.Name
+                    Method        = 'NTFS ACL'
+                    AllowRules    = $allowRules
+                    MatchingRules = $matchingRules
+                }
+        }
 
         return New-ProfMigValidationResult `
             -Check 'DestinationWritable' `
-            -Status 'Passed' `
+            -Status 'Failed' `
             -Severity 'Critical' `
-            -Message 'Destination is writable.' `
+            -Message 'No write-related NTFS allow rule was found for the current security token.' `
             -Details @{
-                Path        = $Path
-                WriteTarget = $writeTarget
+                Path          = $normalizedPath
+                WriteTarget   = $writeTarget
+                Identity      = $identity.Name
+                Method        = 'NTFS ACL'
+                MatchingRules = $matchingRules
             }
     }
     catch {
@@ -607,22 +889,11 @@ function Test-ProfMigDestinationWritable {
             -Check 'DestinationWritable' `
             -Status 'Failed' `
             -Severity 'Critical' `
-            -Message "Destination is not writable: $($_.Exception.Message)" `
+            -Message "Unable to validate destination write access without modifying it: $($_.Exception.Message)" `
             -Details @{
-                Path = $Path
+                Path   = $Path
+                Method = 'NTFS ACL'
             }
-    }
-    finally {
-
-        if (
-            $null -ne $testPath -and
-            (Test-Path -LiteralPath $testPath -PathType Leaf)
-        ) {
-            Remove-Item `
-                -LiteralPath $testPath `
-                -Force `
-                -ErrorAction SilentlyContinue
-        }
     }
 }
 
@@ -1330,6 +1601,14 @@ function Invoke-ProfMigPreMigrationValidation {
 
         [Parameter()]
         [AllowNull()]
+        [string]$SourceUser = $null,
+
+        [Parameter()]
+        [AllowNull()]
+        [string]$DestinationUser = $null,
+
+        [Parameter()]
+        [AllowNull()]
         [object]$Configuration = $null,
 
         [Parameter()]
@@ -1367,8 +1646,11 @@ function Invoke-ProfMigPreMigrationValidation {
 
     $results = New-Object System.Collections.Generic.List[object]
 
+    $sourceIdentity = $null
+    $destinationIdentity = $null
+
     #
-    # 1. Source profile
+    # 1. Source profile existence
     #
     $results.Add(
         (
@@ -1378,7 +1660,63 @@ function Invoke-ProfMigPreMigrationValidation {
     )
 
     #
-    # 2. Destination profile
+    # 2. Source profile path
+    #
+    $results.Add(
+        (
+            Test-ProfMigProfilePath `
+                -Path $SourceProfile `
+                -Role Source
+        )
+    )
+
+    #
+    # 3. Source Windows profile structure
+    #
+    $results.Add(
+        (
+            Convert-ProfMigProfileCheckName `
+                -Result (
+                    Test-ProfMigProfileStructure `
+                        -Path $SourceProfile
+                ) `
+                -Check 'SourceProfileStructure'
+        )
+    )
+
+    #
+    # 4. Source profile registration and identity
+    #
+    try {
+        $sourceIdentity = Get-ProfMigProfileIdentity `
+            -Path $SourceProfile
+    }
+    catch {
+        $sourceIdentity = $null
+    }
+
+    $results.Add(
+        (
+            Convert-ProfMigProfileCheckName `
+                -Result (
+                    Test-ProfMigProfileRegistration `
+                        -Path $SourceProfile
+                ) `
+                -Check 'SourceProfileRegistration'
+        )
+    )
+
+    $results.Add(
+        (
+            Test-ProfMigIdentityMatch `
+                -Role Source `
+                -SelectedUser $SourceUser `
+                -Identity $sourceIdentity
+        )
+    )
+
+    #
+    # 5. Destination profile and path
     #
     $results.Add(
         (
@@ -1387,8 +1725,83 @@ function Invoke-ProfMigPreMigrationValidation {
         )
     )
 
+    $results.Add(
+        (
+            Test-ProfMigProfilePath `
+                -Path $DestinationProfile `
+                -Role Destination
+        )
+    )
+
     #
-    # 3. Source and destination must differ
+    # 6. Existing destination profile structure and identity
+    #
+    if (Test-Path -LiteralPath $DestinationProfile -PathType Container -ErrorAction SilentlyContinue) {
+
+        $results.Add(
+            (
+                Convert-ProfMigProfileCheckName `
+                    -Result (
+                        Test-ProfMigProfileStructure `
+                            -Path $DestinationProfile
+                    ) `
+                    -Check 'DestinationProfileStructure'
+            )
+        )
+
+        try {
+            $destinationIdentity = Get-ProfMigProfileIdentity `
+                -Path $DestinationProfile
+        }
+        catch {
+            $destinationIdentity = $null
+        }
+
+        $results.Add(
+            (
+                Convert-ProfMigProfileCheckName `
+                    -Result (
+                        Test-ProfMigProfileRegistration `
+                            -Path $DestinationProfile
+                    ) `
+                    -Check 'DestinationProfileRegistration'
+            )
+        )
+    }
+    else {
+
+        $results.Add(
+            (
+                New-ProfMigValidationResult `
+                    -Check 'DestinationProfileStructure' `
+                    -Status 'Passed' `
+                    -Severity 'Information' `
+                    -Message 'Destination profile does not yet exist; existing profile structure validation is not applicable.'
+            )
+        )
+
+        $results.Add(
+            (
+                New-ProfMigValidationResult `
+                    -Check 'DestinationProfileRegistration' `
+                    -Status 'Passed' `
+                    -Severity 'Information' `
+                    -Message 'Destination profile does not yet exist; Windows profile registration validation is not applicable.'
+            )
+        )
+    }
+
+    $results.Add(
+        (
+            Test-ProfMigIdentityMatch `
+                -Role Destination `
+                -SelectedUser $DestinationUser `
+                -Identity $destinationIdentity
+        )
+    )
+
+    #
+    # 7. Source and destination must differ
     #
     $results.Add(
         (
@@ -1399,7 +1812,7 @@ function Invoke-ProfMigPreMigrationValidation {
     )
 
     #
-    # 4. Source accessibility
+    # 8. Source read access
     #
     $results.Add(
         (
@@ -1410,7 +1823,7 @@ function Invoke-ProfMigPreMigrationValidation {
     )
 
     #
-    # 5. Destination write access
+    # 9. Destination write access, non-destructive ACL check
     #
     $results.Add(
         (
@@ -1420,13 +1833,13 @@ function Invoke-ProfMigPreMigrationValidation {
     )
 
     #
-    # 6. Privileges
+    # 10. Elevated administrator context
     #
     if (-not $SkipPrivilegeCheck) {
 
         $results.Add(
             (
-                Test-ProfMigPrivileges
+                Test-ProfMigAdministrator
             )
         )
     }
@@ -1435,16 +1848,32 @@ function Invoke-ProfMigPreMigrationValidation {
         $results.Add(
             (
                 New-ProfMigValidationResult `
-                    -Check 'Privileges' `
+                    -Check 'AdministratorContext' `
                     -Status 'Passed' `
                     -Severity 'Information' `
-                    -Message 'Privilege validation was skipped by configuration.'
+                    -Message 'Administrator context validation was skipped by configuration.'
             )
         )
     }
 
     #
-    # 7. ProfMig configuration
+    # 11. Required profile registry access
+    #
+    $sourceSid = $null
+
+    if ($null -ne $sourceIdentity) {
+        $sourceSid = [string]$sourceIdentity.SID
+    }
+
+    $results.Add(
+        (
+            Test-ProfMigRegistryAccess `
+                -SID $sourceSid
+        )
+    )
+
+    #
+    # 12. ProfMig configuration
     #
     $results.Add(
         (
@@ -1455,7 +1884,7 @@ function Invoke-ProfMigPreMigrationValidation {
     )
 
     #
-    # 8. Disk capacity
+    # 13. Disk capacity
     #
     if (-not $SkipDiskSpaceCheck) {
 
@@ -1490,7 +1919,7 @@ function Invoke-ProfMigPreMigrationValidation {
     }
 
     #
-    # 9. Additional safety conditions
+    # 14. Additional safety conditions
     #
     $results.Add(
         (
