@@ -50,6 +50,26 @@ Import-Module `
     -ErrorAction Stop
 
 # ---------------------------------------------------------------------------
+# Internal function: Write-ProfMigCopyInfo
+# ---------------------------------------------------------------------------
+
+function Write-ProfMigCopyInfo {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    if (Get-Command -Name Write-Info -ErrorAction SilentlyContinue) {
+        Write-Info -Message $Message
+    }
+    else {
+        Write-Verbose $Message
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Internal function: Test-ProfMigLegacyExclusion
 # ---------------------------------------------------------------------------
 
@@ -506,8 +526,8 @@ function Copy-ProfMigComponent {
                 Mandatory         = $exclusionResult.Mandatory
             }
 
-            Write-Info `
-                -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+            Write-ProfMigCopyInfo `
+            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
         }
         else {
 
@@ -681,8 +701,8 @@ function Copy-ProfMigComponent {
                             Mandatory         = $centralDirectoryExclusion.Mandatory
                         }
 
-                        Write-Info `
-                            -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
+                        Write-ProfMigCopyInfo `
+                        -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
 
                         continue
                     }
@@ -765,7 +785,7 @@ function Copy-ProfMigComponent {
                         Mandatory         = $centralFileExclusion.Mandatory
                     }
 
-                    Write-Info `
+                    Write-ProfMigCopyInfo `
                         -Message "Excluded [$($centralFileExclusion.Category)] rule $($centralFileExclusion.RuleId): $relativePath - $($centralFileExclusion.Reason)"
 
                     continue
@@ -995,21 +1015,6 @@ function Invoke-ProfMigCopy {
     # -----------------------------------------------------------------------
     # Standard folders
     # -----------------------------------------------------------------------
-
-    # -----------------------------------------------------------------------
-    # Resolve Windows Known Folders
-    # -----------------------------------------------------------------------
-
-    $knownFolders = @(
-        Get-ProfMigKnownFolders `
-            -ProfilePath $resolvedSource
-    )
-
-    $knownFoldersByName = @{}
-
-    foreach ($knownFolder in $knownFolders) {
-        $knownFoldersByName[$knownFolder.Name] = $knownFolder
-    }
 
     foreach ($folder in $selectedFolders) {
 
@@ -1357,8 +1362,8 @@ function Invoke-ProfMigFileCopy {
             Mandatory         = $exclusionResult.Mandatory
         }
 
-        Write-Info `
-            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+    Write-ProfMigCopyInfo `
+        -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
 
         return [PSCustomObject]@{
             Component       = $Component
