@@ -12,6 +12,13 @@
         ApplicationDefinitions = 'Applications'
     }
 
+    Validation = @{
+        Storage = @{
+            SafetyMarginPercent     = 20
+            WarningRemainingPercent = 15
+        }
+    }
+
     ExcludedProfiles = @(
         'All Users'
         'Default'
