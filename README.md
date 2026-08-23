@@ -13,7 +13,7 @@
 <div align="center">
 
 [![Release](https://img.shields.io/github/v/release/scorpido74/ProfMig?include_prereleases&sort=semver)](https://github.com/scorpido74/ProfMig/releases)
-[![Build](https://github.com/scorpido74/ProfMig/actions/workflows/validate.yml/badge.svg)](https://github.com/scorpido74/ProfMig/actions)
+[![Validation](https://github.com/scorpido74/ProfMig/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/scorpido74/ProfMig/actions/workflows/validate.yml)
 [![Issues](https://img.shields.io/github/issues/scorpido74/ProfMig)](https://github.com/scorpido74/ProfMig/issues)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
