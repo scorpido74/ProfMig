@@ -11,10 +11,11 @@ The security of ProfMig and its users is important. If you discover a security v
 The following table indicates which versions of ProfMig receive security updates.
 
 | Version | Supported |
-|----------|:---------:|
-| 1.x.x | ✅ |
-| 0.x.x (Development) | ⚠️ Best effort |
-| Older versions | ❌ |
+|---------|:---------:|
+| Latest release | Yes |
+| Previous releases | Best effort |
+| Development builds | Best effort |
+| Older unsupported releases | No |
 
 ---
 
