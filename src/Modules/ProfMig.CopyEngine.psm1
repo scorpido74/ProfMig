@@ -49,6 +49,39 @@ Import-Module `
 
 Initialize-ProfMigDefaultExclusions
 
+$inventoryModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Inventory.psm1'
+
+if (-not (Test-Path -LiteralPath $inventoryModulePath)) {
+    throw "ProfMig inventory module not found: $inventoryModulePath"
+}
+
+Import-Module `
+    -Name $inventoryModulePath `
+    -Force `
+    -ErrorAction Stop
+
+# ---------------------------------------------------------------------------
+# Internal function: Write-ProfMigCopyInfo
+# ---------------------------------------------------------------------------
+
+function Write-ProfMigCopyInfo {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    if (Get-Command -Name Write-Info -ErrorAction SilentlyContinue) {
+        Write-Info -Message $Message
+    }
+    else {
+        Write-Verbose $Message
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Internal function: Test-ProfMigLegacyExclusion
 # ---------------------------------------------------------------------------
@@ -506,8 +539,8 @@ function Copy-ProfMigComponent {
                 Mandatory         = $exclusionResult.Mandatory
             }
 
-            Write-Info `
-                -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+            Write-ProfMigCopyInfo `
+            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
         }
         else {
 
@@ -681,8 +714,8 @@ function Copy-ProfMigComponent {
                             Mandatory         = $centralDirectoryExclusion.Mandatory
                         }
 
-                        Write-Info `
-                            -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
+                        Write-ProfMigCopyInfo `
+                        -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
 
                         continue
                     }
@@ -765,7 +798,7 @@ function Copy-ProfMigComponent {
                         Mandatory         = $centralFileExclusion.Mandatory
                     }
 
-                    Write-Info `
+                    Write-ProfMigCopyInfo `
                         -Message "Excluded [$($centralFileExclusion.Category)] rule $($centralFileExclusion.RuleId): $relativePath - $($centralFileExclusion.Reason)"
 
                     continue
@@ -972,6 +1005,21 @@ function Invoke-ProfMigCopy {
     $migrationExcludedItems = @()
 
     # -----------------------------------------------------------------------
+    # Resolve Windows Known Folders
+    # -----------------------------------------------------------------------
+
+    $knownFolders = @(
+        Get-ProfMigKnownFolders `
+            -ProfilePath $resolvedSource
+    )
+
+    $knownFoldersByName = @{}
+
+    foreach ($knownFolder in $knownFolders) {
+        $knownFoldersByName[$knownFolder.Name] = $knownFolder
+    }
+
+    # -----------------------------------------------------------------------
     # Standard folders
     # -----------------------------------------------------------------------
 
@@ -985,6 +1033,58 @@ function Invoke-ProfMigCopy {
                 -DestinationFile $null `
                 -ErrorMessage "Unsupported migration folder: $folder"
 
+            continue
+        }
+
+        Write-Verbose "Starting profile component: $folder"
+
+            $knownFolder = $null
+
+        if ($knownFoldersByName.ContainsKey($folder)) {
+
+            $knownFolder = $knownFoldersByName[$folder]
+
+            Write-Verbose (
+                "Known Folder '$folder': Type=$($knownFolder.Type); " +
+                "Redirected=$($knownFolder.Redirected); " +
+                "Path=$($knownFolder.Path)"
+            )
+        }    
+
+        if (
+            $null -ne $knownFolder -and
+            $knownFolder.Type -eq 'OneDrive'
+        ) {
+
+            Write-Verbose (
+            "Skipping cloud-managed Known Folder '$folder': " +
+            $knownFolder.Path
+            )
+
+            $componentResult = [PSCustomObject]@{
+                Component       = $folder
+                SourcePath      = $knownFolder.Path
+                DestinationPath = $null
+
+                StartedAt       = Get-Date
+                CompletedAt     = Get-Date
+                Duration        = [TimeSpan]::Zero
+
+                FilesSelected   = 0
+                FilesCopied     = 0
+                FilesSkipped    = 0
+                FilesExcluded   = 0
+                FilesFailed     = 0
+                BytesCopied     = [int64]0
+
+                Status          = 'CloudManaged'
+
+                SkippedItems    = @()
+                ExcludedItems   = @()
+                Errors          = @()
+            }
+
+            $components += $componentResult
             continue
         }
 
@@ -1270,8 +1370,8 @@ function Invoke-ProfMigFileCopy {
             Mandatory         = $exclusionResult.Mandatory
         }
 
-        Write-Info `
-            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+    Write-ProfMigCopyInfo `
+        -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
 
         return [PSCustomObject]@{
             Component       = $Component
