@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Central pre-migration validation engine for ProfMig.
 
@@ -61,6 +61,24 @@ Import-Module `
     -Force `
     -ErrorAction Stop
 
+# ============================================================================
+# Sprint 3.3 storage validation dependency
+# ============================================================================
+
+$exclusionModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Exclusions.psm1'
+
+if (-not (Test-Path -LiteralPath $exclusionModulePath -PathType Leaf)) {
+    throw "Required ProfMig exclusions module was not found: $exclusionModulePath"
+}
+
+Import-Module `
+    -Name $exclusionModulePath `
+    -Force `
+    -ErrorAction Stop
+
+Initialize-ProfMigDefaultExclusions
 
 
 # ============================================================================
@@ -151,9 +169,13 @@ function Get-ProfMigDirectorySize {
         Calculates the total size of accessible files below a directory.
 
     .DESCRIPTION
-        Files that cannot be read are skipped.
+        Enumerates files without loading the complete profile into memory.
 
-        The function does not modify source data.
+        Files or directories that cannot be accessed do not cause an
+        uncontrolled termination. Enumeration errors are recorded so the
+        caller can determine whether the capacity estimate is complete.
+
+        The function is read-only and does not modify source data.
     #>
 
     [CmdletBinding()]
@@ -168,25 +190,53 @@ function Get-ProfMigDirectorySize {
     }
 
     [Int64]$totalBytes = 0
-    [Int64]$fileCount  = 0
+    [Int64]$fileCount = 0
+    [Int64]$inaccessibleCount = 0
+
+    $errors = New-Object System.Collections.Generic.List[object]
 
     try {
-        $files = Get-ChildItem `
+        Get-ChildItem `
             -LiteralPath $Path `
             -File `
             -Recurse `
             -Force `
-            -ErrorAction SilentlyContinue
+            -ErrorAction SilentlyContinue `
+            -ErrorVariable +enumerationErrors |
+        ForEach-Object {
 
-        foreach ($file in $files) {
             try {
-                $totalBytes += [Int64]$file.Length
+                $totalBytes += [Int64]$_.Length
                 $fileCount++
             }
             catch {
-                # Individual inaccessible files are ignored here.
-                # Accessibility validation is handled separately.
+                $inaccessibleCount++
+
+                $errors.Add(
+                    [PSCustomObject]@{
+                        Path  = $_.Exception.TargetSite
+                        Error = $_.Exception.Message
+                    }
+                )
             }
+        }
+
+        foreach ($enumerationError in @($enumerationErrors)) {
+
+            $inaccessibleCount++
+
+            $targetPath = $null
+
+            if ($null -ne $enumerationError.TargetObject) {
+                $targetPath = [string]$enumerationError.TargetObject
+            }
+
+            $errors.Add(
+                [PSCustomObject]@{
+                    Path  = $targetPath
+                    Error = $enumerationError.Exception.Message
+                }
+            )
         }
     }
     catch {
@@ -194,12 +244,425 @@ function Get-ProfMigDirectorySize {
     }
 
     [PSCustomObject]@{
-        Path       = $Path
-        TotalBytes = $totalBytes
-        FileCount  = $fileCount
+        Path              = $Path
+        TotalBytes        = $totalBytes
+        FileCount         = $fileCount
+        InaccessibleCount = $inaccessibleCount
+        InaccessibleItems = $errors.ToArray()
+        EstimateComplete  = ($inaccessibleCount -eq 0)
     }
 }
 
+function Get-ProfMigSelectedMigrationSize {
+    <#
+    .SYNOPSIS
+        Calculates the estimated size of the selected migration data.
+
+    .DESCRIPTION
+        Calculates the size of standard and additional profile folders
+        selected through the ProfMig configuration.
+
+        Central ProfMig exclusion rules are applied during enumeration.
+
+        Excluded directories are not traversed. Reparse points are skipped.
+
+        The directory tree is processed incrementally to avoid loading an
+        entire profile into memory.
+
+        Inaccessible items are recorded and do not cause uncontrolled
+        termination.
+
+        This function is read-only and does not copy or modify migration data.
+    #>
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SourceProfile,
+
+        [Parameter(Mandatory)]
+        [hashtable]$Configuration
+    )
+
+    [Int64]$totalBytes = 0
+    [Int64]$fileCount = 0
+    [Int64]$excludedCount = 0
+    [Int64]$skippedReparsePoints = 0
+    [Int64]$inaccessibleCount = 0
+
+    $inaccessibleItems = New-Object System.Collections.Generic.List[object]
+    $componentResults = New-Object System.Collections.Generic.List[object]
+
+    $selectedFolders = @()
+
+    if (
+        $Configuration.ContainsKey('Folders') -and
+        $null -ne $Configuration.Folders
+    ) {
+        $selectedFolders += @($Configuration.Folders)
+    }
+
+    if (
+        $Configuration.ContainsKey('AdditionalFolders') -and
+        $null -ne $Configuration.AdditionalFolders
+    ) {
+        $selectedFolders += @($Configuration.AdditionalFolders)
+    }
+
+    $selectedFolders = @(
+        $selectedFolders |
+        Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_)
+        } |
+        Select-Object -Unique
+    )
+
+    foreach ($folder in $selectedFolders) {
+
+        $normalizedFolder = $folder.Replace('/', '\').Trim('\')
+
+        $sourcePath = Join-Path `
+            -Path $SourceProfile `
+            -ChildPath $normalizedFolder
+
+        [Int64]$componentBytes = 0
+        [Int64]$componentFiles = 0
+        [Int64]$componentExcluded = 0
+        [Int64]$componentInaccessible = 0
+        [Int64]$componentReparsePoints = 0
+
+        if (
+            -not (
+                Test-Path `
+                    -LiteralPath $sourcePath `
+                    -PathType Container `
+                    -ErrorAction SilentlyContinue
+            )
+        ) {
+
+            $componentResults.Add(
+                [PSCustomObject]@{
+                    Component          = $normalizedFolder
+                    SourcePath         = $sourcePath
+                    Status             = 'SourceNotFound'
+                    SelectedBytes      = [Int64]0
+                    SelectedFiles      = 0
+                    ExcludedItems      = 0
+                    InaccessibleItems  = 0
+                    ReparsePoints      = 0
+                }
+            )
+
+            continue
+        }
+
+        $directoryQueue = New-Object `
+            'System.Collections.Generic.Queue[string]'
+
+        $directoryQueue.Enqueue($sourcePath)
+
+        while ($directoryQueue.Count -gt 0) {
+
+            $currentDirectory = $directoryQueue.Dequeue()
+
+            try {
+                $children = Get-ChildItem `
+                    -LiteralPath $currentDirectory `
+                    -Force `
+                    -ErrorAction Stop
+            }
+            catch {
+                $inaccessibleCount++
+                $componentInaccessible++
+
+                $inaccessibleItems.Add(
+                    [PSCustomObject]@{
+                        Component = $normalizedFolder
+                        Path      = $currentDirectory
+                        Error     = $_.Exception.Message
+                    }
+                )
+
+                continue
+            }
+
+            foreach ($child in $children) {
+
+                $relativePath = $child.FullName.Substring(
+                    $sourcePath.TrimEnd('\').Length
+                ).TrimStart('\')
+
+                if ($child.PSIsContainer) {
+
+                    $exclusionResult = Test-ProfMigExclusion `
+                        -RelativePath $relativePath `
+                        -IsDirectory
+
+                    if ($exclusionResult.Excluded) {
+                        $excludedCount++
+                        $componentExcluded++
+                        continue
+                    }
+
+                    if (
+                        ($child.Attributes -band
+                            [System.IO.FileAttributes]::ReparsePoint) -ne 0
+                    ) {
+                        $skippedReparsePoints++
+                        $componentReparsePoints++
+                        continue
+                    }
+
+                    $directoryQueue.Enqueue($child.FullName)
+                    continue
+                }
+
+                $exclusionResult = Test-ProfMigExclusion `
+                    -RelativePath $relativePath
+
+                if ($exclusionResult.Excluded) {
+                    $excludedCount++
+                    $componentExcluded++
+                    continue
+                }
+
+                try {
+                    [Int64]$length = $child.Length
+
+                    $totalBytes += $length
+                    $componentBytes += $length
+
+                    $fileCount++
+                    $componentFiles++
+                }
+                catch {
+                    $inaccessibleCount++
+                    $componentInaccessible++
+
+                    $inaccessibleItems.Add(
+                        [PSCustomObject]@{
+                            Component = $normalizedFolder
+                            Path      = $child.FullName
+                            Error     = $_.Exception.Message
+                        }
+                    )
+                }
+            }
+        }
+
+        $componentResults.Add(
+            [PSCustomObject]@{
+                Component         = $normalizedFolder
+                SourcePath        = $sourcePath
+                Status            = 'Scanned'
+                SelectedBytes     = $componentBytes
+                SelectedFiles     = $componentFiles
+                ExcludedItems     = $componentExcluded
+                InaccessibleItems = $componentInaccessible
+                ReparsePoints     = $componentReparsePoints
+            }
+        )
+    }
+
+    return [PSCustomObject]@{
+        SourceProfile        = $SourceProfile
+        SelectedBytes        = $totalBytes
+        SelectedSize         = ConvertTo-ProfMigReadableSize -Bytes $totalBytes
+        SelectedFiles        = $fileCount
+        ExcludedItems        = $excludedCount
+        ReparsePointsSkipped = $skippedReparsePoints
+        InaccessibleCount    = $inaccessibleCount
+        InaccessibleItems    = $inaccessibleItems.ToArray()
+        EstimateComplete     = ($inaccessibleCount -eq 0)
+        Components           = $componentResults.ToArray()
+    }
+}
+
+
+function Get-ProfMigApplicationMigrationSize {
+    <#
+    .SYNOPSIS
+        Calculates the size of selected application migration data.
+
+    .DESCRIPTION
+        Uses existing application migration plans so storage validation follows
+        the same selection as the application migration providers.
+
+        Both the short provider IDs and the IDs used by ProfMig inventory/menu
+        are accepted.
+
+        Unsupported applications are reported explicitly and make
+        EstimateComplete false.
+
+        This function is read-only and does not copy or modify migration data.
+    #>
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$SourceProfile,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$DestinationProfile,
+
+        [Parameter()]
+        [string[]]$Applications = @()
+    )
+
+    [Int64]$totalBytes = 0
+    [Int64]$totalItems = 0
+
+    $results = New-Object System.Collections.Generic.List[object]
+    $unsupportedApplications = New-Object System.Collections.Generic.List[string]
+
+    foreach ($application in @($Applications)) {
+
+        [Int64]$applicationBytes = 0
+        [Int64]$applicationItems = 0
+        $status = 'NotSelected'
+        $normalizedApplication = $application
+
+        switch ($application) {
+            'Google.Chrome' {
+                $normalizedApplication = 'Chrome'
+            }
+
+            'Microsoft.Edge' {
+                $normalizedApplication = 'Edge'
+            }
+
+            'Microsoft.Outlook' {
+                $normalizedApplication = 'Outlook'
+            }
+        }
+
+        switch ($normalizedApplication) {
+
+            'Chrome' {
+                $plan = Get-ProfMigChromeMigrationPlan `
+                    -SourceProfile $SourceProfile `
+                    -DestinationProfile $DestinationProfile
+
+                foreach ($profile in @($plan.Profiles)) {
+                    foreach ($item in @($profile.MigrationItems)) {
+                        if ($null -ne $item.Size) {
+                            $applicationBytes += [Int64]$item.Size
+                        }
+
+                        $applicationItems++
+                    }
+                }
+
+                $status = if ($plan.Detected) {
+                    'Calculated'
+                }
+                else {
+                    'NotDetected'
+                }
+            }
+
+            'Edge' {
+                $plan = Get-ProfMigEdgeMigrationPlan `
+                    -ProfilePath $SourceProfile
+
+                foreach ($profile in @($plan.Profiles)) {
+                    foreach ($item in @(
+                        $profile.Items |
+                            Where-Object {
+                                $_.Exists -and
+                                $_.Action -eq 'Migrate'
+                            }
+                    )) {
+                        try {
+                            if (
+                                Test-Path `
+                                    -LiteralPath $item.Path `
+                                    -PathType Leaf `
+                                    -ErrorAction SilentlyContinue
+                            ) {
+                                $file = Get-Item `
+                                    -LiteralPath $item.Path `
+                                    -Force `
+                                    -ErrorAction Stop
+
+                                $applicationBytes += [Int64]$file.Length
+                            }
+                            elseif (
+                                Test-Path `
+                                    -LiteralPath $item.Path `
+                                    -PathType Container `
+                                    -ErrorAction SilentlyContinue
+                            ) {
+                                $directorySize = Get-ProfMigDirectorySize `
+                                    -Path $item.Path
+
+                                $applicationBytes += [Int64]$directorySize.TotalBytes
+                            }
+                        }
+                        catch {
+                            # Continue with the capacity that could be determined.
+                        }
+
+                        $applicationItems++
+                    }
+                }
+
+                $status = if ($plan.Detected) {
+                    'Calculated'
+                }
+                else {
+                    'NotDetected'
+                }
+            }
+
+            'Outlook' {
+                $plan = Get-ProfMigOutlookMigrationPlan `
+                    -ProfilePath $SourceProfile
+
+                $applicationBytes = [Int64]$plan.MigrationBytes
+                $applicationItems = [Int64]$plan.MigrateCount
+
+                $status = if ($plan.ItemsDetected -gt 0) {
+                    'Calculated'
+                }
+                else {
+                    'NotDetected'
+                }
+            }
+
+            default {
+                $status = 'Unsupported'
+                $unsupportedApplications.Add([string]$application)
+            }
+        }
+
+        $totalBytes += $applicationBytes
+        $totalItems += $applicationItems
+
+        $results.Add(
+            [PSCustomObject]@{
+                Application = $application
+                Status      = $status
+                Items       = $applicationItems
+                Bytes       = $applicationBytes
+                Size        = ConvertTo-ProfMigReadableSize `
+                    -Bytes $applicationBytes
+            }
+        )
+    }
+
+    return [PSCustomObject]@{
+        Applications            = $results.ToArray()
+        TotalBytes              = $totalBytes
+        TotalSize               = ConvertTo-ProfMigReadableSize -Bytes $totalBytes
+        TotalItems              = $totalItems
+        EstimateComplete        = ($unsupportedApplications.Count -eq 0)
+        UnsupportedApplications = $unsupportedApplications.ToArray()
+    }
+}
 
 function Get-ProfMigDriveFreeSpace {
     <#
@@ -1161,22 +1624,86 @@ function Test-ProfMigDiskSpace {
         [int]$WarningRemainingPercent = $script:DefaultDiskSpaceWarningPercent,
 
         [Parameter()]
-        [Nullable[Int64]]$RequiredBytes
+        [Nullable[Int64]]$RequiredBytes,
+
+        [Parameter()]
+        [AllowNull()]
+        [hashtable]$Configuration = $null,
+
+        [Parameter()]
+        [string[]]$SelectedApplications = @()
     )
 
     try {
 
-        if ($null -ne $RequiredBytes) {
+    if ($null -ne $RequiredBytes) {
 
-            $sourceBytes = [Int64]$RequiredBytes
-            $sourceFileCount = $null
-        }
-        else {
+    $sourceBytes = [Int64]$RequiredBytes
+    $sourceFileCount = $null
+    $inaccessibleCount = $null
+    $inaccessibleItems = @()
+    $estimateComplete = $null
+    $sizeCalculationMethod = 'ProvidedRequiredBytes'
+    }
+    elseif (
+        $null -ne $Configuration -and
+        $Configuration.ContainsKey('Folders')
+    ) {
 
-            $sourceSize = Get-ProfMigDirectorySize -Path $SourceProfile
+        $sourceSize = Get-ProfMigSelectedMigrationSize `
+            -SourceProfile $SourceProfile `
+            -Configuration $Configuration
 
-            $sourceBytes = [Int64]$sourceSize.TotalBytes
-            $sourceFileCount = $sourceSize.FileCount
+        $sourceBytes = [Int64]$sourceSize.SelectedBytes
+        $sourceFileCount = $sourceSize.SelectedFiles
+        $inaccessibleCount = $sourceSize.InaccessibleCount
+        $inaccessibleItems = $sourceSize.InaccessibleItems
+        $estimateComplete = $sourceSize.EstimateComplete
+        $sizeCalculationMethod = 'MigrationSelection'
+    }
+    else {
+
+        $sourceSize = Get-ProfMigDirectorySize -Path $SourceProfile
+
+        $sourceBytes = [Int64]$sourceSize.TotalBytes
+        $sourceFileCount = $sourceSize.FileCount
+        $inaccessibleCount = $sourceSize.InaccessibleCount
+        $inaccessibleItems = $sourceSize.InaccessibleItems
+        $estimateComplete = $sourceSize.EstimateComplete
+        $sizeCalculationMethod = 'FullSourceProfile'
+    }
+
+        # ------------------------------------------------------------
+        # Selected application migration capacity
+        # ------------------------------------------------------------
+
+        [Int64]$profileBytes = $sourceBytes
+        [Int64]$applicationBytes = 0
+        [Int64]$applicationItemCount = 0
+        $applicationSize = $null
+        $applicationEstimateComplete = $true
+        $unsupportedApplications = @()
+
+        if (
+            $null -eq $RequiredBytes -and
+            $SelectedApplications.Count -gt 0
+        ) {
+
+            $applicationSize = Get-ProfMigApplicationMigrationSize `
+                -SourceProfile $SourceProfile `
+                -DestinationProfile $DestinationProfile `
+                -Applications $SelectedApplications
+
+            $applicationBytes = [Int64]$applicationSize.TotalBytes
+            $applicationItemCount = [Int64]$applicationSize.TotalItems
+            $applicationEstimateComplete = [bool]$applicationSize.EstimateComplete
+            $unsupportedApplications = @(
+                $applicationSize.UnsupportedApplications
+            )
+
+            $sourceBytes = $profileBytes + $applicationBytes
+
+            $sizeCalculationMethod = 'MigrationSelectionWithApplications'
         }
 
         if (Test-Path -LiteralPath $DestinationProfile) {
@@ -1218,20 +1745,57 @@ if ($freeAfterMigration -gt 0) {
         }
 
         $details = @{
+            CalculationMethod         = $sizeCalculationMethod
+
+            ProfileBytes              = $profileBytes
+            ProfileSize               = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $profileBytes
+
+            ApplicationBytes          = $applicationBytes
+            ApplicationSize           = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $applicationBytes
+            ApplicationItemCount      = $applicationItemCount
+            SelectedApplications      = @($SelectedApplications)
+            ApplicationDetails        = $applicationSize
+
             SourceBytes               = $sourceBytes
-            SourceSize                = ConvertTo-ProfMigReadableSize -Bytes $sourceBytes
+            SourceSize                = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $sourceBytes
+
             SourceFileCount           = $sourceFileCount
+            InaccessibleCount         = $inaccessibleCount
+            InaccessibleItems         = $inaccessibleItems
+            ProfileEstimateComplete   = $estimateComplete
+            ApplicationEstimateComplete = $applicationEstimateComplete
+            EstimateComplete          = (
+                                            ($estimateComplete -ne $false) -and
+                                            $applicationEstimateComplete
+                                        )
+            UnsupportedApplications   = @($unsupportedApplications)
+
             BufferPercent             = $BufferPercent
             BufferBytes               = $bufferBytes
+
             RequiredBytes             = $requiredWithBuffer
-            RequiredSize              = ConvertTo-ProfMigReadableSize -Bytes $requiredWithBuffer
+            RequiredSize              = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $requiredWithBuffer
+
             AvailableBytes            = $availableBytes
-            AvailableSize             = ConvertTo-ProfMigReadableSize -Bytes $availableBytes
+            AvailableSize             = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $availableBytes
+
             FreeAfterMigrationBytes   = $freeAfterMigration
-            FreeAfterMigration = ConvertTo-ProfMigReadableSize -Bytes $displayFreeAfterMigration
-            RemainingPercent          = [Math]::Round($remainingPercent, 2)
+            FreeAfterMigration        = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $displayFreeAfterMigration
+
+            RemainingPercent          = [Math]::Round(
+                                            $remainingPercent,
+                                            2
+                                        )
+
             DestinationDrive          = $driveSpace.Root
-            DestinationDriveTotalSize = ConvertTo-ProfMigReadableSize -Bytes $driveSpace.TotalBytes
+            DestinationDriveTotalSize = ConvertTo-ProfMigReadableSize `
+                                            -Bytes $driveSpace.TotalBytes
         }
 
         if ($availableBytes -lt $requiredWithBuffer) {
@@ -1635,6 +2199,9 @@ function Invoke-ProfMigPreMigrationValidation {
         [Nullable[Int64]]$RequiredMigrationBytes,
 
         [Parameter()]
+        [string[]]$SelectedApplications = @(),
+
+        [Parameter()]
         [switch]$SkipPrivilegeCheck,
 
         [Parameter()]
@@ -1888,11 +2455,45 @@ function Invoke-ProfMigPreMigrationValidation {
     #
     if (-not $SkipDiskSpaceCheck) {
 
+        $effectiveBufferPercent = $DiskSpaceBufferPercent
+        $effectiveWarningPercent = $DiskSpaceWarningPercent
+
+        if (
+            $null -ne $Configuration -and
+            $Configuration -is [System.Collections.IDictionary] -and
+            $Configuration.Contains('Validation')
+        ) {
+            $validationConfiguration = $Configuration['Validation']
+
+            if (
+                $null -ne $validationConfiguration -and
+                $validationConfiguration -is [System.Collections.IDictionary] -and
+                $validationConfiguration.Contains('Storage')
+            ) {
+                $storageConfiguration = $validationConfiguration['Storage']
+
+                if (
+                    $null -ne $storageConfiguration -and
+                    $storageConfiguration -is [System.Collections.IDictionary]
+                ) {
+                    if ($storageConfiguration.Contains('SafetyMarginPercent')) {
+                        $effectiveBufferPercent = [int]$storageConfiguration['SafetyMarginPercent']
+                    }
+
+                    if ($storageConfiguration.Contains('WarningRemainingPercent')) {
+                        $effectiveWarningPercent = [int]$storageConfiguration['WarningRemainingPercent']
+                    }
+                }
+            }
+        }
+
         $diskParameters = @{
             SourceProfile           = $SourceProfile
             DestinationProfile      = $DestinationProfile
-            BufferPercent           = $DiskSpaceBufferPercent
-            WarningRemainingPercent = $DiskSpaceWarningPercent
+            BufferPercent           = $effectiveBufferPercent
+            WarningRemainingPercent = $effectiveWarningPercent
+            Configuration           = $Configuration
+            SelectedApplications    = @($SelectedApplications)
         }
 
         if ($null -ne $RequiredMigrationBytes) {
@@ -2078,5 +2679,7 @@ Export-ModuleMember -Function @(
     'Test-ProfMigCriticalConditions',
     'Invoke-ProfMigPreMigrationValidation',
     'Assert-ProfMigMigrationAllowed',
-    'ConvertTo-ProfMigValidationReport'
+    'ConvertTo-ProfMigValidationReport',
+    'Get-ProfMigApplicationMigrationSize',
+    'Get-ProfMigSelectedMigrationSize'
 )

@@ -1,7 +1,7 @@
 @{
     Application = @{
         Name    = 'ProfMig'
-        Version = '1.0'
+        Version = '0.2.0'
         Build   = 'Development'
     }
 
@@ -10,6 +10,13 @@
         Reports                = 'Reports'
         Backup                 = 'Backup'
         ApplicationDefinitions = 'Applications'
+    }
+
+    Validation = @{
+        Storage = @{
+            SafetyMarginPercent     = 20
+            WarningRemainingPercent = 15
+        }
     }
 
     ExcludedProfiles = @(

@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # ProfMig.Menu.psm1
 # ============================================================================
 #
@@ -995,6 +995,193 @@ function Start-ProfMigMenu {
                 }
 
                 # ------------------------------------------------------------
+                # M1 configuration
+                # ------------------------------------------------------------
+
+                $copyConfiguration = New-ProfMigCopyConfiguration
+
+                # ------------------------------------------------------------
+                # Pre-migration validation
+                # ------------------------------------------------------------
+
+                $validationConfiguration = @{}
+
+                foreach ($key in $Configuration.Keys) {
+                    $validationConfiguration[$key] = $Configuration[$key]
+                }
+
+                $validationConfiguration['Folders'] = @(
+                    $copyConfiguration.Folders
+                )
+
+                $validationConfiguration['AdditionalFolders'] = @(
+                    $copyConfiguration.AdditionalFolders
+                )
+
+                $selectedApplicationIds = @(
+                    $selectedApplications |
+                        ForEach-Object {
+                            $_.Id
+                        }
+                )
+
+                try {
+
+                    Write-Host 'Running pre-migration validation...' `
+                        -ForegroundColor Cyan
+                    Write-Host ''
+
+                    $validationResult = Invoke-ProfMigPreMigrationValidation `
+                        -SourceProfile $sourceProfile.ProfilePath `
+                        -DestinationProfile $destinationProfile.ProfilePath `
+                        -Configuration $validationConfiguration `
+                        -SelectedApplications $selectedApplicationIds
+
+                    $storageValidation = @(
+                        $validationResult.Results |
+                            Where-Object {
+                                $_.Check -eq 'FreeDiskSpace'
+                            }
+                    ) |
+                        Select-Object -First 1
+
+                    if ($null -ne $storageValidation) {
+
+                        $storageColor = switch ($storageValidation.Status) {
+                            'Passed'  { 'Green' }
+                            'Warning' { 'Yellow' }
+                            'Failed'  { 'Red' }
+                            default   { 'White' }
+                        }
+
+                        Write-Host 'Storage capacity' -ForegroundColor Cyan
+                        Write-Host (
+                            " Selected data   : {0}" -f
+                            $storageValidation.Details['SourceSize']
+                        )
+                        Write-Host (
+                            " Profile data    : {0}" -f
+                            $storageValidation.Details['ProfileSize']
+                        )
+                        Write-Host (
+                            " Application data: {0}" -f
+                            $storageValidation.Details['ApplicationSize']
+                        )
+                        Write-Host (
+                            " Safety margin   : {0}%" -f
+                            $storageValidation.Details['BufferPercent']
+                        )
+                        Write-Host (
+                            " Required space  : {0}" -f
+                            $storageValidation.Details['RequiredSize']
+                        )
+                        Write-Host (
+                            " Available space : {0}" -f
+                            $storageValidation.Details['AvailableSize']
+                        )
+                        $estimateComplete =
+                            $storageValidation.Details['EstimateComplete']
+
+                        $estimateText = if ($estimateComplete -eq $false) {
+                            'No'
+                        }
+                        else {
+                            'Yes'
+                        }
+
+                        $estimateColor = if ($estimateComplete -eq $false) {
+                            'Yellow'
+                        }
+                        else {
+                            'Green'
+                        }
+
+                        Write-Host (
+                            " Estimate complete: {0}" -f
+                            $estimateText
+                        ) -ForegroundColor $estimateColor
+
+                        $unsupportedApplications = @(
+                            $storageValidation.Details['UnsupportedApplications']
+                        )
+
+                        if ($unsupportedApplications.Count -gt 0) {
+                            Write-Host (
+                                " Unsupported apps : {0}" -f
+                                ($unsupportedApplications -join ', ')
+                            ) -ForegroundColor Yellow
+                        }
+
+                        Write-Host (
+                            " Status          : {0}" -f
+                            $storageValidation.Status
+                        ) -ForegroundColor $storageColor
+                        Write-Host ''
+                    }
+
+                    foreach ($validationWarning in @(
+                        $validationResult.Results |
+                            Where-Object {
+                                $_.Status -eq 'Warning'
+                            }
+                    )) {
+                        Write-Host (
+                            "Validation warning: {0}" -f
+                            $validationWarning.Message
+                        ) -ForegroundColor Yellow
+                    }
+
+                    if (-not $validationResult.CanProceed) {
+
+                        Write-Host ''
+                        Write-Host 'Migration blocked.' -ForegroundColor Red
+                        Write-Host (
+                            'One or more critical pre-migration validation ' +
+                            'checks failed.'
+                        ) -ForegroundColor Red
+                        Write-Host ''
+
+                        foreach ($failedValidation in @(
+                            $validationResult.Results |
+                                Where-Object {
+                                    $_.Severity -eq 'Critical' -and
+                                    $_.Status -eq 'Failed'
+                                }
+                        )) {
+                            Write-Host (
+                                " - {0}: {1}" -f
+                                $failedValidation.Check,
+                                $failedValidation.Message
+                            ) -ForegroundColor Red
+                        }
+
+                        Write-Host ''
+                        Read-Host 'Press Enter to return to the main menu' |
+                            Out-Null
+
+                        continue
+                    }
+                }
+                catch {
+
+                    Write-Host ''
+                    Write-Host 'Pre-migration validation failed.' `
+                        -ForegroundColor Red
+                    Write-Host $_.Exception.Message -ForegroundColor Red
+                    Write-Host ''
+
+                    Write-ErrorLog (
+                        "Pre-migration validation failed: " +
+                        "$($_.Exception.Message)"
+                    )
+
+                    Read-Host 'Press Enter to return to the main menu' |
+                        Out-Null
+
+                    continue
+                }
+
+                # ------------------------------------------------------------
                 # Migration summary
                 # ------------------------------------------------------------
 
@@ -1006,7 +1193,7 @@ function Start-ProfMigMenu {
                     'The following folders will be migrated:' `
                     -ForegroundColor Cyan
 
-                    foreach ($folder in $copyConfiguration.Folders) {
+                foreach ($folder in $copyConfiguration.Folders) {
                     Write-Host " - $folder"
                 }
 
@@ -1044,12 +1231,6 @@ function Start-ProfMigMenu {
                     continue
                 }
 
-                # ------------------------------------------------------------
-                # M1 configuration
-                # ------------------------------------------------------------
-
-                $copyConfiguration = New-ProfMigCopyConfiguration
-
                 $copyResult = $null
                 $applicationMigrationResult = $null
                 $reportResult = $null
@@ -1070,7 +1251,7 @@ function Start-ProfMigMenu {
                     $copyResult = Invoke-ProfMigCopy `
                         -SourceProfile $sourceProfile.ProfilePath `
                         -DestinationProfile $destinationProfile.ProfilePath `
-                        -Configuration $copyConfiguration
+                        -Configuration $validationConfiguration
                 }
                 catch {
 

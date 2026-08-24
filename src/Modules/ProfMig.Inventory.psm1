@@ -525,7 +525,188 @@ function Get-ProfMigApplicationInventory {
     return $applicationInventory
 }
 
+function Get-ProfMigKnownFolders {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ProfilePath
+    )
+
+    $resolvedProfilePath = (
+        Resolve-Path -LiteralPath $ProfilePath -ErrorAction Stop
+    ).Path.TrimEnd('\')
+
+    $userProfile = Get-CimInstance Win32_UserProfile -ErrorAction Stop |
+        Where-Object {
+            $_.LocalPath.TrimEnd('\') -eq $resolvedProfilePath
+        } |
+        Select-Object -First 1
+
+    if ($null -eq $userProfile) {
+        throw "Windows user profile could not be matched: $resolvedProfilePath"
+    }
+
+        $temporaryHiveLoaded = $false
+    $temporaryHiveName = $null
+
+    try {
+
+        if ($userProfile.Loaded) {
+
+            $shellFolderPath = (
+                "Registry::HKEY_USERS\$($userProfile.SID)\" +
+                "Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            )
+        }
+        else {
+
+            $ntUserDat = Join-Path `
+                -Path $resolvedProfilePath `
+                -ChildPath 'NTUSER.DAT'
+
+            if (-not (Test-Path -LiteralPath $ntUserDat -PathType Leaf)) {
+                throw "NTUSER.DAT could not be found for profile: $resolvedProfilePath"
+            }
+
+            $temporaryHiveName = (
+                "ProfMig_" +
+                ($userProfile.SID -replace '[^A-Za-z0-9]', '_')
+            )
+
+            $temporaryHiveRegistryPath = (
+                "Registry::HKEY_USERS\$temporaryHiveName"
+            )
+
+            if (Test-Path -LiteralPath $temporaryHiveRegistryPath) {
+                throw "Temporary ProfMig registry hive already exists: $temporaryHiveName"
+            }
+
+            $regOutput = & reg.exe load `
+                "HKU\$temporaryHiveName" `
+                $ntUserDat 2>&1
+
+            if ($LASTEXITCODE -ne 0) {
+                throw (
+                    "Unable to load NTUSER.DAT for profile '$resolvedProfilePath'. " +
+                    ($regOutput -join ' ')
+                )
+            }
+
+            $temporaryHiveLoaded = $true
+
+            $shellFolderPath = (
+                "Registry::HKEY_USERS\$temporaryHiveName\" +
+                "Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders"
+            )
+        }
+
+        if (-not (Test-Path -LiteralPath $shellFolderPath)) {
+            throw "User Shell Folders registry key could not be found for profile: $resolvedProfilePath"
+        }
+
+        $shellFolders = Get-ItemProperty `
+            -LiteralPath $shellFolderPath `
+            -ErrorAction Stop
+
+    $folderDefinitions = @(
+        @{ Name = 'Desktop';   RegistryName = 'Desktop';      Default = 'Desktop' }
+        @{ Name = 'Documents'; RegistryName = 'Personal';     Default = 'Documents' }
+        @{ Name = 'Downloads'; RegistryName = '{374DE290-123F-4565-9164-39C4925E467B}'; Default = 'Downloads' }
+        @{ Name = 'Pictures';  RegistryName = 'My Pictures';  Default = 'Pictures' }
+        @{ Name = 'Music';     RegistryName = 'My Music';     Default = 'Music' }
+        @{ Name = 'Videos';    RegistryName = 'My Video';     Default = 'Videos' }
+        @{ Name = 'Favorites'; RegistryName = 'Favorites';    Default = 'Favorites' }
+        @{ Name = 'Links';     RegistryName = '{BFB9D5E0-C6A9-404C-B2B2-AE6DB6AF4968}'; Default = 'Links' }
+    )
+
+    $results = @()
+
+    foreach ($definition in $folderDefinitions) {
+
+        $configuredPath = $null
+
+        $registryProperty = $shellFolders.PSObject.Properties[
+            $definition.RegistryName
+        ]
+
+        if ($null -ne $registryProperty) {
+            $configuredPath = [string]$registryProperty.Value
+        }
+
+        if ([string]::IsNullOrWhiteSpace($configuredPath)) {
+            $configuredPath = Join-Path `
+                -Path $resolvedProfilePath `
+                -ChildPath $definition.Default
+        }
+
+        $configuredPath = [Environment]::ExpandEnvironmentVariables(
+            $configuredPath
+        )
+
+        $normalizedPath = $configuredPath.TrimEnd('\')
+
+        $isRedirected = -not $normalizedPath.StartsWith(
+            "$resolvedProfilePath\",
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+
+        $isOneDrive = (
+            $normalizedPath -match '\\OneDrive(?:\s*-\s*[^\\]+)?(?:\\|$)' -or
+            $normalizedPath -like '*\OneDrive\*'
+        )
+
+        #
+        # OneDrive KFM normally remains underneath the Windows profile.
+        # Therefore OneDrive classification takes precedence over the
+        # generic redirected-path test.
+        #
+        if ($isOneDrive) {
+            $type = 'OneDrive'
+            $isRedirected = $true
+        }
+        elseif ($isRedirected) {
+            $type = 'Redirected'
+        }
+        else {
+            $type = 'Local'
+        }
+        
+        $results += [PSCustomObject]@{
+            Name       = $definition.Name
+            Path       = $normalizedPath
+            Type       = $type
+            Redirected = $isRedirected
+            Exists     = Test-Path -LiteralPath $normalizedPath -PathType Container
+        }
+    }
+
+           return $results
+    }
+    finally {
+
+        if ($temporaryHiveLoaded) {
+
+            [gc]::Collect()
+            [gc]::WaitForPendingFinalizers()
+
+            $regOutput = & reg.exe unload `
+                "HKU\$temporaryHiveName" 2>&1
+
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning (
+                    "Unable to unload temporary ProfMig registry hive " +
+                    "'$temporaryHiveName'. " +
+                    ($regOutput -join ' ')
+                )
+            }
+        }
+    }
+}
+
 Export-ModuleMember -Function @(
     'Get-UserProfiles',
+    'Get-ProfMigKnownFolders',
     'Get-ProfMigApplicationInventory'
 )

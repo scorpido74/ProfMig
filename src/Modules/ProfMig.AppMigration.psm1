@@ -893,53 +893,14 @@ function Invoke-ProfMigApplicationMigration {
         )
     }
 
-    # -----------------------------------------------------------------------
-    # Pre-migration validation
-    # -----------------------------------------------------------------------
-
-    $preValidation = Test-ProfMigApplicationValidation `
-        -Definition $Definition `
-        -ProfilePath $SourceProfile `
-        -Phase PreMigration
-
-    if (-not $preValidation.Valid) {
-
-    $completedAt = Get-Date
-
-    return [PSCustomObject]@{
-        ApplicationId      = $Definition.Application.Id
-        ApplicationName    = $Definition.Application.Name
-
-        SourceProfile      = $SourceProfile
-        DestinationProfile = $DestinationProfile
-
-        StartedAt          = $startedAt
-        CompletedAt        = $completedAt
-        Duration           = ($completedAt - $startedAt)
-
-        Status             = 'Blocked'
-
-        Plan               = $null
-
-        PreValidation      = $preValidation
-        PostValidation     = $null
-
-        FilesSelected      = 0
-        FilesCopied        = 0
-        FilesSkipped       = 0
-        FilesExcluded      = 0
-        FilesFailed        = 0
-        BytesCopied        = [int64]0
-
-        Components         = @()
-        SkippedItems       = @()
-        ExcludedItems      = @()
-        Errors             = @($preValidation.Errors)
-    }
-}
 
     # -----------------------------------------------------------------------
-    # Build migration plan
+    # Build migration plan first
+    #
+    # Detection must happen before pre-migration validation. A validation
+    # PathExists rule may legitimately fail when the application itself is
+    # not installed/present in the source profile. That situation is
+    # NotDetected, not Blocked.
     # -----------------------------------------------------------------------
 
     $plan = Get-ProfMigApplicationMigrationPlan `
@@ -970,6 +931,9 @@ function Invoke-ProfMigApplicationMigration {
             Status             = 'NotDetected'
 
             Plan               = $plan
+
+            PreValidation      = $null
+            PostValidation     = $null
 
             FilesSelected      = 0
             FilesCopied        = 0
@@ -1004,6 +968,9 @@ function Invoke-ProfMigApplicationMigration {
 
             Plan               = $plan
 
+            PreValidation      = $null
+            PostValidation     = $null
+
             FilesSelected      = 0
             FilesCopied        = 0
             FilesSkipped       = 0
@@ -1020,6 +987,59 @@ function Invoke-ProfMigApplicationMigration {
                     }
             )
             Errors             = @()
+        }
+    }
+
+
+    # -----------------------------------------------------------------------
+    # Pre-migration validation
+    #
+    # Only validate a plan that is actually runnable.
+    # -----------------------------------------------------------------------
+
+    $preValidation = Test-ProfMigApplicationValidation `
+        -Definition $Definition `
+        -ProfilePath $plan.SourceProfile `
+        -Phase PreMigration
+
+    if (-not $preValidation.Valid) {
+
+        $completedAt = Get-Date
+
+        return [PSCustomObject]@{
+            ApplicationId      = $plan.ApplicationId
+            ApplicationName    = $plan.ApplicationName
+
+            SourceProfile      = $plan.SourceProfile
+            DestinationProfile = $plan.DestinationProfile
+
+            StartedAt          = $startedAt
+            CompletedAt        = $completedAt
+            Duration           = ($completedAt - $startedAt)
+
+            Status             = 'Blocked'
+
+            Plan               = $plan
+
+            PreValidation      = $preValidation
+            PostValidation     = $null
+
+            FilesSelected      = 0
+            FilesCopied        = 0
+            FilesSkipped       = 0
+            FilesExcluded      = $plan.FilesExcluded
+            FilesFailed        = 0
+            BytesCopied        = [int64]0
+
+            Components         = @()
+            SkippedItems       = @()
+            ExcludedItems      = @(
+                $plan.Items |
+                    Where-Object {
+                        $_.Status -eq 'Excluded'
+                    }
+            )
+            Errors             = @($preValidation.Errors)
         }
     }
 
@@ -1088,6 +1108,7 @@ function Invoke-ProfMigApplicationMigration {
         $filesFailed   += $component.FilesFailed
         $bytesCopied   += $component.BytesCopied
     }
+
 
     # -----------------------------------------------------------------------
     # Post-migration validation

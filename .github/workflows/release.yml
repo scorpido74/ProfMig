@@ -1,0 +1,174 @@
+name: Release ProfMig
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine release version
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+
+          if ($tag -notmatch '^v(\d+\.\d+\.\d+)$') {
+              throw "Invalid release tag: $tag"
+          }
+
+          $version = $Matches[1]
+
+          Write-Host "Release tag     : $tag"
+          Write-Host "Release version : $version"
+
+          "RELEASE_VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+
+      - name: Validate ProfMig version
+        shell: pwsh
+        run: |
+          $config = Import-PowerShellDataFile '.\src\Config.psd1'
+          $configVersion = [string]$config.Application.Version
+
+          Write-Host "Config version  : $configVersion"
+          Write-Host "Release version : $env:RELEASE_VERSION"
+
+          if ($configVersion -ne $env:RELEASE_VERSION) {
+              throw (
+                  "Version mismatch. Config.psd1 contains '$configVersion' " +
+                  "but the release tag specifies '$env:RELEASE_VERSION'."
+              )
+          }
+
+          Write-Host 'Version validation passed.'
+
+      - name: Validate PowerShell syntax
+        shell: pwsh
+        run: |
+          $files = @(
+              Get-ChildItem `
+                  -Path '.\src' `
+                  -Recurse `
+                  -File `
+                  -Include *.ps1,*.psm1
+          )
+
+          $errorsFound = @()
+
+          foreach ($file in $files) {
+              $tokens = $null
+              $errors = $null
+
+              [void][System.Management.Automation.Language.Parser]::ParseFile(
+                  $file.FullName,
+                  [ref]$tokens,
+                  [ref]$errors
+              )
+
+              if ($errors.Count -gt 0) {
+                  foreach ($error in $errors) {
+                      $errorsFound += [PSCustomObject]@{
+                          File    = $file.FullName
+                          Message = $error.Message
+                      }
+                  }
+              }
+          }
+
+          if ($errorsFound.Count -gt 0) {
+              $errorsFound | Format-Table -AutoSize
+              throw "$($errorsFound.Count) PowerShell syntax error(s) found."
+          }
+
+          Write-Host "PASS: $($files.Count) PowerShell files passed syntax validation."
+
+      - name: Create release package
+        shell: pwsh
+        run: |
+          $packageRoot = Join-Path $env:RUNNER_TEMP 'ProfMig'
+          $zipName = "ProfMig-$env:RELEASE_TAG.zip"
+          $zipPath = Join-Path $env:RUNNER_TEMP $zipName
+
+          New-Item `
+              -Path $packageRoot `
+              -ItemType Directory `
+              -Force | Out-Null
+
+          $items = @(
+              'src',
+              'docs',
+              'assets',
+              'Start-ProfMig.bat',
+              'README.md',
+              'LICENSE',
+              'SECURITY.md',
+              'CHANGELOG.md'
+          )
+
+          foreach ($item in $items) {
+              if (-not (Test-Path -LiteralPath $item)) {
+                  throw "Required release item not found: $item"
+              }
+
+              Copy-Item `
+                  -LiteralPath $item `
+                  -Destination $packageRoot `
+                  -Recurse `
+                  -Force
+          }
+
+          $configPath = Join-Path $packageRoot 'src\Config.psd1'
+
+          $configContent = Get-Content `
+              -LiteralPath $configPath `
+              -Raw
+
+          $configContent = $configContent -replace (
+              "Build\s*=\s*'Development'",
+              "Build   = 'Release'"
+          )
+
+          Set-Content `
+              -LiteralPath $configPath `
+              -Value $configContent `
+              -Encoding UTF8
+
+          $releaseConfig = Import-PowerShellDataFile $configPath
+
+          if ($releaseConfig.Application.Version -ne $env:RELEASE_VERSION) {
+              throw 'Release package version validation failed.'
+          }
+
+          if ($releaseConfig.Application.Build -ne 'Release') {
+              throw 'Release package build validation failed.'
+          }
+
+          Compress-Archive `
+              -Path $packageRoot `
+              -DestinationPath $zipPath `
+              -CompressionLevel Optimal
+
+          Write-Host "Release package created: $zipPath"
+
+          "RELEASE_ZIP=$zipPath" >> $env:GITHUB_ENV
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create `
+              $env:RELEASE_TAG `
+              $env:RELEASE_ZIP `
+              --title "ProfMig $env:RELEASE_TAG" `
+              --generate-notes

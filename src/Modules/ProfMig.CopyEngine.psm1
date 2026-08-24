@@ -62,6 +62,39 @@ Import-Module `
 
 Initialize-ProfMigDefaultExclusions
 
+$inventoryModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Inventory.psm1'
+
+if (-not (Test-Path -LiteralPath $inventoryModulePath)) {
+    throw "ProfMig inventory module not found: $inventoryModulePath"
+}
+
+Import-Module `
+    -Name $inventoryModulePath `
+    -Force `
+    -ErrorAction Stop
+
+# ---------------------------------------------------------------------------
+# Internal function: Write-ProfMigCopyInfo
+# ---------------------------------------------------------------------------
+
+function Write-ProfMigCopyInfo {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Message
+    )
+
+    if (Get-Command -Name Write-Info -ErrorAction SilentlyContinue) {
+        Write-Info -Message $Message
+    }
+    else {
+        Write-Verbose $Message
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Internal function: Test-ProfMigLegacyExclusion
 # ---------------------------------------------------------------------------
@@ -211,14 +244,248 @@ function New-ProfMigCopyError {
         [string]$DestinationFile,
 
         [Parameter(Mandatory)]
-        [string]$ErrorMessage
+        [string]$ErrorMessage,
+
+        [Parameter()]
+        [string]$Reason = 'UnknownError',
+
+        [Parameter()]
+        [bool]$Critical = $false,
+
+        [Parameter()]
+        [bool]$Retryable = $false,
+
+        [Parameter()]
+        [int]$RetryCount = 0,
+
+        [Parameter()]
+        [AllowNull()]
+        [string]$ExceptionType
     )
 
     return [PSCustomObject]@{
         Component       = $Component
         SourceFile      = $SourceFile
         DestinationFile = $DestinationFile
+        Status          = 'Failed'
+        Reason          = $Reason
+        Critical        = $Critical
+        Retryable       = $Retryable
+        RetryCount      = $RetryCount
+        ExceptionType   = $ExceptionType
         Error           = $ErrorMessage
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Internal function: Get-ProfMigFileErrorClassification
+# ---------------------------------------------------------------------------
+
+function Get-ProfMigFileErrorClassification {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [System.Exception]$Exception,
+
+        [Parameter()]
+        [ValidateSet(
+            'Read',
+            'Write',
+            'Enumerate',
+            'Unknown'
+        )]
+        [string]$Operation = 'Unknown'
+    )
+
+    # -----------------------------------------------------------------------
+    # Unwrap PowerShell/.NET wrapper exceptions
+    #
+    # PowerShell may wrap filesystem exceptions in exceptions such as
+    # MethodInvocationException. Classification must use the underlying
+    # filesystem exception instead of localized exception messages.
+    # -----------------------------------------------------------------------
+
+    $classificationException = $Exception
+
+    while ($null -ne $classificationException.InnerException) {
+
+        $classificationException = `
+            $classificationException.InnerException
+    }
+
+    $reason = 'UnknownError'
+    $retryable = $false
+    $critical = $false
+
+    # -----------------------------------------------------------------------
+    # Classify known filesystem exceptions
+    # -----------------------------------------------------------------------
+
+    if (
+        $classificationException -is
+        [System.UnauthorizedAccessException]
+    ) {
+
+        $reason = 'AccessDenied'
+    }
+    elseif (
+        $classificationException -is
+        [System.IO.FileNotFoundException]
+    ) {
+
+        $reason = 'SourceNotFound'
+    }
+    elseif (
+        $classificationException -is
+        [System.IO.DirectoryNotFoundException]
+    ) {
+
+        $reason = 'SourceDirectoryNotFound'
+    }
+    elseif (
+        $classificationException -is
+        [System.Management.Automation.ItemNotFoundException]
+    ) {
+
+        switch ($Operation) {
+
+            'Enumerate' {
+                $reason = 'SourceDirectoryNotFound'
+            }
+
+            'Read' {
+                $reason = 'SourceNotFound'
+            }
+
+            default {
+                $reason = 'SourceNotFound'
+            }
+        }
+    }
+    elseif (
+        $classificationException -is
+        [System.IO.PathTooLongException]
+    ) {
+
+        $reason = 'PathTooLong'
+    }
+    elseif (
+        $classificationException -is
+        [System.NotSupportedException]
+    ) {
+
+        $reason = 'InvalidPath'
+    }
+    elseif (
+        $classificationException -is
+        [System.ArgumentException]
+    ) {
+
+        $reason = 'InvalidPath'
+    }
+    elseif (
+        $classificationException -is
+        [System.IO.IOException]
+    ) {
+
+        # Sharing violations and lock conflicts are exposed by Windows
+        # through IOException. Inspect the native HRESULT where possible.
+        $nativeErrorCode = `
+            $classificationException.HResult -band 0xFFFF
+
+        switch ($nativeErrorCode) {
+
+            32 {
+                # ERROR_SHARING_VIOLATION
+                $reason = 'FileLocked'
+                $retryable = $true
+            }
+
+            33 {
+                # ERROR_LOCK_VIOLATION
+                $reason = 'FileLocked'
+                $retryable = $true
+            }
+
+            default {
+
+                switch ($Operation) {
+
+                    'Read' {
+                        $reason = 'ReadError'
+                        $retryable = $true
+                    }
+
+                    'Write' {
+                        $reason = 'WriteError'
+                        $retryable = $true
+                    }
+
+                    'Enumerate' {
+                        $reason = 'ReadError'
+                        $retryable = $true
+                    }
+
+                    default {
+                        $reason = 'IOError'
+                        $retryable = $true
+                    }
+                }
+            }
+        }
+    }
+
+    return [PSCustomObject]@{
+        Reason        = $reason
+        Retryable     = $retryable
+        Critical      = $critical
+        ExceptionType = $classificationException.GetType().FullName
+        HResult       = $classificationException.HResult
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Internal function: Get-ProfMigDestinationErrorClassification
+# ---------------------------------------------------------------------------
+
+function Get-ProfMigDestinationErrorClassification {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [System.Exception]$Exception
+    )
+
+    $classificationException = $Exception
+
+    while ($null -ne $classificationException.InnerException) {
+        $classificationException = $classificationException.InnerException
+    }
+
+    if (
+        $classificationException -is
+        [System.Management.Automation.DriveNotFoundException]
+    ) {
+        return [PSCustomObject]@{
+            Reason        = 'DestinationUnavailable'
+            Retryable     = $false
+            Critical      = $true
+            ExceptionType = $classificationException.GetType().FullName
+            HResult       = $classificationException.HResult
+        }
+    }
+
+    $classification = Get-ProfMigFileErrorClassification `
+        -Exception $Exception `
+        -Operation Write
+
+    return [PSCustomObject]@{
+        Reason        = $classification.Reason
+        Retryable     = $classification.Retryable
+        Critical      = $classification.Critical
+        ExceptionType = $classification.ExceptionType
+        HResult       = $classification.HResult
     }
 }
 
@@ -255,6 +522,57 @@ function ConvertTo-ProfMigExtendedPath {
 
 
 # ---------------------------------------------------------------------------
+# Internal function: Test-ProfMigFileExists
+# ---------------------------------------------------------------------------
+
+function Test-ProfMigFileExists {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    try {
+
+        $extendedPath = ConvertTo-ProfMigExtendedPath `
+            -Path $Path
+
+        return [System.IO.File]::Exists($extendedPath)
+    }
+    catch {
+        return $false
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Internal function: Get-ProfMigFileInfo
+# ---------------------------------------------------------------------------
+
+function Get-ProfMigFileInfo {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $extendedPath = ConvertTo-ProfMigExtendedPath `
+        -Path $Path
+
+    if (-not [System.IO.File]::Exists($extendedPath)) {
+        throw [System.IO.FileNotFoundException]::new(
+            'Source file does not exist.',
+            $Path
+        )
+    }
+
+    return [System.IO.FileInfo]::new($extendedPath)
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal function: Copy-ProfMigSingleFile
 # ---------------------------------------------------------------------------
 
@@ -275,7 +593,15 @@ function Copy-ProfMigSingleFile {
         [string]$RelativePath,
 
         [Parameter()]
-        [string[]]$Exclusions = @()
+        [string[]]$Exclusions = @(),
+
+        [Parameter()]
+        [ValidateRange(0, 10)]
+        [int]$RetryCount = 3,
+
+        [Parameter()]
+        [ValidateRange(0, 60)]
+        [int]$RetryDelaySeconds = 2
     )
 
     $result = [ordered]@{
@@ -306,6 +632,10 @@ function Copy-ProfMigSingleFile {
         return [PSCustomObject]$result
     }
 
+    # -----------------------------------------------------------------------
+    # Prepare destination
+    # -----------------------------------------------------------------------
+
     try {
         $destinationDirectory = Split-Path `
             -Path $DestinationFile `
@@ -322,50 +652,128 @@ function Copy-ProfMigSingleFile {
             $extendedDestinationDirectory = ConvertTo-ProfMigExtendedPath `
                 -Path $destinationDirectory
 
-            [System.IO.Directory]::CreateDirectory(
+                [System.IO.Directory]::CreateDirectory(
                 $extendedDestinationDirectory
             ) | Out-Null
         }
-
-        $extendedDestinationFile = ConvertTo-ProfMigExtendedPath `
-            -Path $DestinationFile
-
-        if ([System.IO.File]::Exists($extendedDestinationFile)) {
-            $result.Skipped = 1
-
-            $result.SkippedItem = [PSCustomObject]@{
-                Component       = $Component
-                SourceFile      = $File.FullName
-                DestinationFile = $DestinationFile
-                Reason          = 'Destination file already exists'
-            }
-
-            return [PSCustomObject]$result
-        }
-
-        $sourceCopyPath = ConvertTo-ProfMigExtendedPath `
-            -Path $File.FullName
-
-        $destinationCopyPath = ConvertTo-ProfMigExtendedPath `
-            -Path $DestinationFile
-
-        [System.IO.File]::Copy(
-            $sourceCopyPath,
-            $destinationCopyPath,
-            $false
-        )
-
-        $result.Copied = 1
-        $result.BytesCopied = [int64]$File.Length
     }
     catch {
+
+        $classification = Get-ProfMigFileErrorClassification `
+            -Exception $_.Exception `
+            -Operation Write
+
         $result.Failed = 1
 
         $result.Error = New-ProfMigCopyError `
             -Component $Component `
             -SourceFile $File.FullName `
             -DestinationFile $DestinationFile `
-            -ErrorMessage $_.Exception.Message
+            -ErrorMessage $_.Exception.Message `
+            -Reason $classification.Reason `
+            -Critical $classification.Critical `
+            -Retryable $false `
+            -RetryCount 0 `
+            -ExceptionType $classification.ExceptionType
+
+        return [PSCustomObject]$result
+    }
+
+    # -----------------------------------------------------------------------
+    # Destination already exists
+    # -----------------------------------------------------------------------
+
+    $extendedDestinationFile = ConvertTo-ProfMigExtendedPath `
+        -Path $DestinationFile
+
+    if ([System.IO.File]::Exists($extendedDestinationFile)) {
+
+        $result.Skipped = 1
+
+        $result.SkippedItem = [PSCustomObject]@{
+            Component       = $Component
+            SourceFile      = $File.FullName
+            DestinationFile = $DestinationFile
+            Reason          = 'Destination file already exists'
+        }
+
+        return [PSCustomObject]$result
+    }
+
+    # -----------------------------------------------------------------------
+    # Copy file with bounded retry
+    #
+    # RetryCount defines retries after the initial attempt.
+    # RetryCount 3 therefore means a maximum of four copy attempts.
+    # -----------------------------------------------------------------------
+
+    $sourceCopyPath = ConvertTo-ProfMigExtendedPath `
+        -Path $File.FullName
+
+    $destinationCopyPath = ConvertTo-ProfMigExtendedPath `
+        -Path $DestinationFile
+
+    $retryAttempts = 0
+
+    while ($true) {
+
+        try {
+
+            [System.IO.File]::Copy(
+                $sourceCopyPath,
+                $destinationCopyPath,
+                $false
+            )
+
+            $result.Copied = 1
+            $result.BytesCopied = [int64]$File.Length
+
+            break
+        }
+        catch {
+
+            $copyException = $_.Exception
+
+            $classification = Get-ProfMigFileErrorClassification `
+                -Exception $copyException `
+                -Operation Write
+
+            if (
+                $classification.Retryable -and
+                $retryAttempts -lt $RetryCount
+            ) {
+
+                $retryAttempts++
+
+                Write-ProfMigCopyInfo `
+                    -Message (
+                        "Retry $retryAttempts of $RetryCount for " +
+                        "'$($File.FullName)' after " +
+                        "$($classification.Reason)."
+                    )
+
+                if ($RetryDelaySeconds -gt 0) {
+                    Start-Sleep -Seconds $RetryDelaySeconds
+                }
+
+                continue
+            }
+
+            $result.Failed = 1
+
+            $result.Error = New-ProfMigCopyError `
+                -Component $Component `
+                -SourceFile $File.FullName `
+                -DestinationFile $DestinationFile `
+                -ErrorMessage $copyException.Message `
+                -Reason $classification.Reason `
+                -Critical $classification.Critical `
+                -Retryable $classification.Retryable `
+                -RetryCount $retryAttempts `
+                -ExceptionType $classification.ExceptionType
+
+            break
+        }
     }
 
     return [PSCustomObject]$result
@@ -490,8 +898,8 @@ function Copy-ProfMigComponent {
                 Mandatory         = $exclusionResult.Mandatory
             }
 
-            Write-Info `
-                -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+            Write-ProfMigCopyInfo `
+            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
         }
         else {
             $fileResult = Copy-ProfMigSingleFile `
@@ -539,6 +947,10 @@ function Copy-ProfMigComponent {
             }
         }
         catch {
+
+            $classification = Get-ProfMigDestinationErrorClassification `
+                -Exception $_.Exception
+
             $componentCompletedAt = Get-Date
 
             return [PSCustomObject]@{
@@ -562,7 +974,12 @@ function Copy-ProfMigComponent {
                         -Component $Component `
                         -SourceFile $SourcePath `
                         -DestinationFile $DestinationPath `
-                        -ErrorMessage $_.Exception.Message
+                        -ErrorMessage $_.Exception.Message `
+                        -Reason $classification.Reason `
+                        -Critical $classification.Critical `
+                        -Retryable $classification.Retryable `
+                        -RetryCount 0 `
+                        -ExceptionType $classification.ExceptionType
                 )
             }
         }
@@ -588,6 +1005,11 @@ function Copy-ProfMigComponent {
                 )
             }
             catch {
+
+                $classification = Get-ProfMigFileErrorClassification `
+                    -Exception $_.Exception `
+                    -Operation Enumerate
+
                 $filesFailed++
 
                 $errors += New-ProfMigCopyError `
@@ -597,7 +1019,12 @@ function Copy-ProfMigComponent {
                     -ErrorMessage (
                         "Unable to enumerate directory: " +
                         $_.Exception.Message
-                    )
+                    ) `
+                    -Reason $classification.Reason `
+                    -Critical $classification.Critical `
+                    -Retryable $classification.Retryable `
+                    -RetryCount 0 `
+                    -ExceptionType $classification.ExceptionType
 
                 continue
             }
@@ -628,8 +1055,8 @@ function Copy-ProfMigComponent {
                             Mandatory         = $centralDirectoryExclusion.Mandatory
                         }
 
-                        Write-Info `
-                            -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
+                        Write-ProfMigCopyInfo `
+                        -Message "Excluded [$($centralDirectoryExclusion.Category)] rule $($centralDirectoryExclusion.RuleId): $relativeDirectory - $($centralDirectoryExclusion.Reason)"
 
                         continue
                     }
@@ -701,7 +1128,7 @@ function Copy-ProfMigComponent {
                         Mandatory         = $centralFileExclusion.Mandatory
                     }
 
-                    Write-Info `
+                    Write-ProfMigCopyInfo `
                         -Message "Excluded [$($centralFileExclusion.Category)] rule $($centralFileExclusion.RuleId): $relativePath - $($centralFileExclusion.Reason)"
 
                     continue
@@ -907,6 +1334,26 @@ function Invoke-ProfMigCopy {
     $migrationSkippedItems  = @()
     $migrationExcludedItems = @()
     $permissionResults      = @()
+    $criticalFailure        = $false
+
+    # -----------------------------------------------------------------------
+    # Resolve Windows Known Folders
+    # -----------------------------------------------------------------------
+
+    $knownFolders = @(
+        Get-ProfMigKnownFolders `
+            -ProfilePath $resolvedSource
+    )
+
+    $knownFoldersByName = @{}
+
+    foreach ($knownFolder in $knownFolders) {
+        $knownFoldersByName[$knownFolder.Name] = $knownFolder
+    }
+
+    # -----------------------------------------------------------------------
+    # Standard folders
+    # -----------------------------------------------------------------------
 
     foreach ($folder in $selectedFolders) {
 
@@ -917,6 +1364,58 @@ function Invoke-ProfMigCopy {
                 -DestinationFile $null `
                 -ErrorMessage "Unsupported migration folder: $folder"
 
+            continue
+        }
+
+        Write-Verbose "Starting profile component: $folder"
+
+            $knownFolder = $null
+
+        if ($knownFoldersByName.ContainsKey($folder)) {
+
+            $knownFolder = $knownFoldersByName[$folder]
+
+            Write-Verbose (
+                "Known Folder '$folder': Type=$($knownFolder.Type); " +
+                "Redirected=$($knownFolder.Redirected); " +
+                "Path=$($knownFolder.Path)"
+            )
+        }
+
+        if (
+            $null -ne $knownFolder -and
+            $knownFolder.Type -eq 'OneDrive'
+        ) {
+
+            Write-Verbose (
+            "Skipping cloud-managed Known Folder '$folder': " +
+            $knownFolder.Path
+            )
+
+            $componentResult = [PSCustomObject]@{
+                Component       = $folder
+                SourcePath      = $knownFolder.Path
+                DestinationPath = $null
+
+                StartedAt       = Get-Date
+                CompletedAt     = Get-Date
+                Duration        = [TimeSpan]::Zero
+
+                FilesSelected   = 0
+                FilesCopied     = 0
+                FilesSkipped    = 0
+                FilesExcluded   = 0
+                FilesFailed     = 0
+                BytesCopied     = [int64]0
+
+                Status          = 'CloudManaged'
+
+                SkippedItems    = @()
+                ExcludedItems   = @()
+                Errors          = @()
+            }
+
+            $components += $componentResult
             continue
         }
 
@@ -973,9 +1472,35 @@ function Invoke-ProfMigCopy {
         if ($componentResult.Errors.Count -gt 0) {
             $migrationErrors += $componentResult.Errors
         }
+
+        $criticalErrors = @(
+            $componentResult.Errors |
+                Where-Object {
+                    $_.Critical -eq $true
+                }
+        )
+
+        if ($criticalErrors.Count -gt 0) {
+
+            $criticalFailure = $true
+
+            Write-ProfMigCopyInfo `
+                -Message (
+                    "Critical migration failure in component '$folder'. " +
+                    "Further components will not be processed."
+                )
+
+            break
+        }
     }
 
-    foreach ($folder in $additionalFolders) {
+    # -----------------------------------------------------------------------
+    # Additional folders
+    # -----------------------------------------------------------------------
+
+    if (-not $criticalFailure) {
+
+        foreach ($folder in $additionalFolders) {
 
         if (-not (Test-ProfMigRelativeFolder -Path $folder)) {
             $migrationErrors += New-ProfMigCopyError `
@@ -1055,6 +1580,27 @@ function Invoke-ProfMigCopy {
         if ($componentResult.Errors.Count -gt 0) {
             $migrationErrors += $componentResult.Errors
         }
+
+        $criticalErrors = @(
+            $componentResult.Errors |
+                Where-Object {
+                    $_.Critical -eq $true
+                }
+        )
+
+        if ($criticalErrors.Count -gt 0) {
+
+            $criticalFailure = $true
+
+            Write-ProfMigCopyInfo `
+                -Message (
+                    "Critical migration failure in component " +
+                    "'$normalizedFolder'. Further components will not be processed."
+                )
+
+            break
+        }
+        }
     }
 
     $totalFilesSelected = 0
@@ -1122,7 +1668,10 @@ function Invoke-ProfMigCopy {
             }
     )
 
-    if (
+    if ($criticalFailure) {
+        $overallStatus = 'Failed'
+    }
+    elseif (
         $failedComponents.Count -gt 0 -or
         $migrationErrors.Count -gt 0 -or
         $permissionErrors -gt 0
@@ -1186,13 +1735,8 @@ function Invoke-ProfMigFileCopy {
 
     $startedAt = Get-Date
 
-    if (
-        -not (
-            Test-Path `
-                -LiteralPath $SourceFile `
-                -PathType Leaf
-        )
-    ) {
+    if (-not (Test-ProfMigFileExists -Path $SourceFile)) {
+
         $completedAt = Get-Date
 
         return [PSCustomObject]@{
@@ -1216,18 +1760,26 @@ function Invoke-ProfMigFileCopy {
                     -Component $Component `
                     -SourceFile $SourceFile `
                     -DestinationFile $DestinationFile `
-                    -ErrorMessage 'Source file does not exist.'
+                    -ErrorMessage 'Source file does not exist.' `
+                    -Reason 'SourceNotFound' `
+                    -Critical $false `
+                    -Retryable $false `
+                    -RetryCount 0 `
+                    -ExceptionType 'System.IO.FileNotFoundException'
             )
         }
     }
 
     try {
-        $sourceItem = Get-Item `
-            -LiteralPath $SourceFile `
-            -Force `
-            -ErrorAction Stop
+        $sourceItem = Get-ProfMigFileInfo `
+            -Path $SourceFile
     }
     catch {
+
+        $classification = Get-ProfMigFileErrorClassification `
+            -Exception $_.Exception `
+            -Operation Read
+
         $completedAt = Get-Date
 
         return [PSCustomObject]@{
@@ -1251,7 +1803,12 @@ function Invoke-ProfMigFileCopy {
                     -Component $Component `
                     -SourceFile $SourceFile `
                     -DestinationFile $DestinationFile `
-                    -ErrorMessage $_.Exception.Message
+                    -ErrorMessage $_.Exception.Message `
+                    -Reason $classification.Reason `
+                    -Critical $classification.Critical `
+                    -Retryable $classification.Retryable `
+                    -RetryCount 0 `
+                    -ExceptionType $classification.ExceptionType
             )
         }
     }
@@ -1278,8 +1835,8 @@ function Invoke-ProfMigFileCopy {
             Mandatory         = $exclusionResult.Mandatory
         }
 
-        Write-Info `
-            -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
+    Write-ProfMigCopyInfo `
+        -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
 
         return [PSCustomObject]@{
             Component       = $Component
