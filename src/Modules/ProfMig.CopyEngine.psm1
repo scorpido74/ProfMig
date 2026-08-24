@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Core copy engine for ProfMig.
 
@@ -17,7 +17,7 @@
     Project : ProfMig
     Module  : ProfMig.CopyEngine
     Sprint  : 1.6 - Copy Engine
-    Updated : 2.7 - Resilient traversal and application integration
+    Updated : 3.5 - Permissions and ACL integration
 #>
 Set-StrictMode -Version Latest
 
@@ -44,6 +44,19 @@ if (-not (Test-Path -LiteralPath $validationModulePath)) {
 
 Import-Module `
     -Name $validationModulePath `
+    -Force `
+    -ErrorAction Stop
+
+$permissionsModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Permissions.psm1'
+
+if (-not (Test-Path -LiteralPath $permissionsModulePath)) {
+    throw "ProfMig permissions module not found: $permissionsModulePath"
+}
+
+Import-Module `
+    -Name $permissionsModulePath `
     -Force `
     -ErrorAction Stop
 
@@ -226,22 +239,20 @@ function ConvertTo-ProfMigExtendedPath {
         return $Path
     }
 
-    # UNC path
     if ($Path.StartsWith('\\')) {
-
         return (
             '\\?\UNC\' +
             $Path.TrimStart('\')
         )
     }
 
-    # Local absolute path
     if ([System.IO.Path]::IsPathRooted($Path)) {
         return "\\?\$Path"
     }
 
     return $Path
 }
+
 
 # ---------------------------------------------------------------------------
 # Internal function: Copy-ProfMigSingleFile
@@ -284,7 +295,6 @@ function Copy-ProfMigSingleFile {
             -RelativePath $RelativePath `
             -Exclusions $Exclusions
     ) {
-
         $result.Excluded = 1
 
         $result.ExcludedItem = [PSCustomObject]@{
@@ -297,7 +307,6 @@ function Copy-ProfMigSingleFile {
     }
 
     try {
-
         $destinationDirectory = Split-Path `
             -Path $DestinationFile `
             -Parent
@@ -310,20 +319,18 @@ function Copy-ProfMigSingleFile {
                     -PathType Container
             )
         ) {
+            $extendedDestinationDirectory = ConvertTo-ProfMigExtendedPath `
+                -Path $destinationDirectory
 
-        $extendedDestinationDirectory = ConvertTo-ProfMigExtendedPath `
-            -Path $destinationDirectory
-
-        [System.IO.Directory]::CreateDirectory(
-            $extendedDestinationDirectory
-        ) | Out-Null
+            [System.IO.Directory]::CreateDirectory(
+                $extendedDestinationDirectory
+            ) | Out-Null
         }
 
         $extendedDestinationFile = ConvertTo-ProfMigExtendedPath `
             -Path $DestinationFile
 
         if ([System.IO.File]::Exists($extendedDestinationFile)) {
-
             $result.Skipped = 1
 
             $result.SkippedItem = [PSCustomObject]@{
@@ -352,7 +359,6 @@ function Copy-ProfMigSingleFile {
         $result.BytesCopied = [int64]$File.Length
     }
     catch {
-
         $result.Failed = 1
 
         $result.Error = New-ProfMigCopyError `
@@ -402,32 +408,23 @@ function Copy-ProfMigComponent {
 
     Write-Verbose "Processing component '$Component': $SourcePath"
 
-    # -----------------------------------------------------------------------
-    # Validate source
-    # -----------------------------------------------------------------------
-
     if (-not (Test-Path -LiteralPath $SourcePath)) {
-
         $componentCompletedAt = Get-Date
 
         return [PSCustomObject]@{
             Component       = $Component
             SourcePath      = $SourcePath
             DestinationPath = $DestinationPath
-
             StartedAt       = $componentStartedAt
             CompletedAt     = $componentCompletedAt
             Duration        = ($componentCompletedAt - $componentStartedAt)
-
             FilesSelected   = 0
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
             BytesCopied     = [int64]0
-
             Status          = 'SourceNotFound'
-
             SkippedItems    = @()
             ExcludedItems   = @()
             Errors          = @()
@@ -435,37 +432,30 @@ function Copy-ProfMigComponent {
     }
 
     try {
-
         $sourceItem = Get-Item `
             -LiteralPath $SourcePath `
             -Force `
             -ErrorAction Stop
     }
     catch {
-
         $componentCompletedAt = Get-Date
 
         return [PSCustomObject]@{
             Component       = $Component
             SourcePath      = $SourcePath
             DestinationPath = $DestinationPath
-
             StartedAt       = $componentStartedAt
             CompletedAt     = $componentCompletedAt
             Duration        = ($componentCompletedAt - $componentStartedAt)
-
             FilesSelected   = 0
             FilesCopied     = 0
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
             BytesCopied     = [int64]0
-
             Status          = 'Failed'
-
             SkippedItems    = @()
             ExcludedItems   = @()
-
             Errors          = @(
                 New-ProfMigCopyError `
                     -Component $Component `
@@ -476,12 +466,7 @@ function Copy-ProfMigComponent {
         }
     }
 
-    # -----------------------------------------------------------------------
-    # Single-file component
-    # -----------------------------------------------------------------------
-
     if (-not $sourceItem.PSIsContainer) {
-
         $relativePath = $sourceItem.Name
 
         $exclusionResult = Test-ProfMigExclusion `
@@ -489,7 +474,6 @@ function Copy-ProfMigComponent {
             -Application $Component
 
         if ($exclusionResult.Excluded) {
-
             $filesSelected++
             $filesExcluded++
 
@@ -510,7 +494,6 @@ function Copy-ProfMigComponent {
                 -Message "Excluded [$($exclusionResult.Category)] rule $($exclusionResult.RuleId): $relativePath - $($exclusionResult.Reason)"
         }
         else {
-
             $fileResult = Copy-ProfMigSingleFile `
                 -Component $Component `
                 -File $sourceItem `
@@ -537,23 +520,9 @@ function Copy-ProfMigComponent {
                 $errors += $fileResult.Error
             }
         }
-
     }
-
-    # -----------------------------------------------------------------------
-    # Directory component
-    #
-    # IMPORTANT:
-    # Do not use Get-ChildItem -Recurse.
-    #
-    # We maintain our own directory queue and inspect one directory at a
-    # time. Reparse points are never added to the queue.
-    # -----------------------------------------------------------------------
-
     else {
-
         try {
-
             if (
                 -not (
                     Test-Path `
@@ -561,7 +530,6 @@ function Copy-ProfMigComponent {
                         -PathType Container
                 )
             ) {
-
                 New-Item `
                     -Path $DestinationPath `
                     -ItemType Directory `
@@ -571,30 +539,24 @@ function Copy-ProfMigComponent {
             }
         }
         catch {
-
             $componentCompletedAt = Get-Date
 
             return [PSCustomObject]@{
                 Component       = $Component
                 SourcePath      = $SourcePath
                 DestinationPath = $DestinationPath
-
                 StartedAt       = $componentStartedAt
                 CompletedAt     = $componentCompletedAt
                 Duration        = ($componentCompletedAt - $componentStartedAt)
-
                 FilesSelected   = 0
                 FilesCopied     = 0
                 FilesSkipped    = 0
                 FilesExcluded   = 0
                 FilesFailed     = 0
                 BytesCopied     = [int64]0
-
                 Status          = 'Failed'
-
                 SkippedItems    = @()
                 ExcludedItems   = @()
-
                 Errors          = @(
                     New-ProfMigCopyError `
                         -Component $Component `
@@ -611,19 +573,13 @@ function Copy-ProfMigComponent {
         $directoryQueue.Enqueue($sourceItem.FullName)
 
         while ($directoryQueue.Count -gt 0) {
-
             $currentDirectory = $directoryQueue.Dequeue()
 
             Write-Verbose (
                 "Scanning '$Component': $currentDirectory"
             )
 
-            # ---------------------------------------------------------------
-            # Enumerate this directory only
-            # ---------------------------------------------------------------
-
             try {
-
                 $children = @(
                     Get-ChildItem `
                         -LiteralPath $currentDirectory `
@@ -632,7 +588,6 @@ function Copy-ProfMigComponent {
                 )
             }
             catch {
-
                 $filesFailed++
 
                 $errors += New-ProfMigCopyError `
@@ -648,24 +603,16 @@ function Copy-ProfMigComponent {
             }
 
             foreach ($child in $children) {
-
-                # -----------------------------------------------------------
-                # Directory
-                # -----------------------------------------------------------
-
                 if ($child.PSIsContainer) {
-
                     $relativeDirectory = Get-ProfMigRelativePath `
                         -BasePath $SourcePath `
                         -FullPath $child.FullName
 
-                    # Central application exclusion policy takes precedence.
                     $centralDirectoryExclusion = Test-ProfMigExclusion `
                         -RelativePath $relativeDirectory `
                         -Application $Component
 
                     if ($centralDirectoryExclusion.Excluded) {
-
                         $filesExcluded++
 
                         $excludedItems += [PSCustomObject]@{
@@ -687,13 +634,11 @@ function Copy-ProfMigComponent {
                         continue
                     }
 
-                    # Preserve configured/legacy exclusions from the copy engine.
                     if (
                         Test-ProfMigLegacyExclusion `
                             -RelativePath $relativeDirectory `
                             -Exclusions $Exclusions
                     ) {
-
                         $filesExcluded++
 
                         $excludedItems += [PSCustomObject]@{
@@ -706,10 +651,7 @@ function Copy-ProfMigComponent {
                         continue
                     }
 
-                    # Never traverse junctions, symlinks or other
-                    # filesystem reparse points.
                     if (Test-ProfMigReparsePoint -Item $child) {
-
                         $filesSkipped++
 
                         $skippedItems += [PSCustomObject]@{
@@ -727,13 +669,8 @@ function Copy-ProfMigComponent {
                     }
 
                     $directoryQueue.Enqueue($child.FullName)
-
                     continue
                 }
-
-                # -----------------------------------------------------------
-                # File
-                # -----------------------------------------------------------
 
                 $relativePath = Get-ProfMigRelativePath `
                     -BasePath $SourcePath `
@@ -748,7 +685,6 @@ function Copy-ProfMigComponent {
                     -Application $Component
 
                 if ($centralFileExclusion.Excluded) {
-
                     $filesSelected++
                     $filesExcluded++
 
@@ -800,10 +736,6 @@ function Copy-ProfMigComponent {
         }
     }
 
-    # -----------------------------------------------------------------------
-    # Determine status
-    # -----------------------------------------------------------------------
-
     if ($filesFailed -gt 0) {
         $status = 'CompletedWithErrors'
     }
@@ -820,20 +752,16 @@ function Copy-ProfMigComponent {
         Component       = $Component
         SourcePath      = $SourcePath
         DestinationPath = $DestinationPath
-
         StartedAt       = $componentStartedAt
         CompletedAt     = $componentCompletedAt
         Duration        = ($componentCompletedAt - $componentStartedAt)
-
         FilesSelected   = $filesSelected
         FilesCopied     = $filesCopied
         FilesSkipped    = $filesSkipped
         FilesExcluded   = $filesExcluded
         FilesFailed     = $filesFailed
         BytesCopied     = $bytesCopied
-
         Status          = $status
-
         SkippedItems    = @($skippedItems)
         ExcludedItems   = @($excludedItems)
         Errors          = @($errors)
@@ -890,14 +818,6 @@ function Invoke-ProfMigCopy {
 
     $migrationStartedAt = Get-Date
 
-    # -----------------------------------------------------------------------
-    # Sprint 3.1 - Central pre-migration validation
-    #
-    # This is the mandatory gate before any migration data is copied.
-    # Validation owns the profile, accessibility, privilege, configuration,
-    # destination write and storage checks. Do not duplicate those checks here.
-    # -----------------------------------------------------------------------
-
     $validation = Invoke-ProfMigPreMigrationValidation `
         -SourceProfile $SourceProfile `
         -DestinationProfile $DestinationProfile `
@@ -907,9 +827,6 @@ function Invoke-ProfMigCopy {
     Assert-ProfMigMigrationAllowed `
         -ValidationSummary $validation | Out-Null
 
-    # Validation may allow a destination profile that does not yet exist.
-    # The copy engine needs the profile root before component directories can
-    # be created, so create it only after the validation gate has passed.
     if (-not (Test-Path -LiteralPath $DestinationProfile -PathType Container)) {
         New-Item `
             -Path $DestinationProfile `
@@ -928,8 +845,31 @@ function Invoke-ProfMigCopy {
     ).Path.TrimEnd('\')
 
     # -----------------------------------------------------------------------
-    # Read migration configuration
+    # Sprint 3.5 - Resolve source and destination SID context
     # -----------------------------------------------------------------------
+
+    $sourceProfileSid = Get-ProfMigProfileSid `
+        -ProfilePath $resolvedSource
+
+    $sourceSid = if ($sourceProfileSid.Success) {
+        $sourceProfileSid.Sid
+    }
+    else {
+        $null
+    }
+
+    $destinationProfileSid = Get-ProfMigProfileSid `
+        -ProfilePath $resolvedDestination
+
+    if (-not $destinationProfileSid.Success) {
+        throw (
+            "Unable to determine destination profile SID for '{0}'. {1}" -f `
+                $resolvedDestination,
+                $destinationProfileSid.Error
+        )
+    }
+
+    $destinationSid = $destinationProfileSid.Sid
 
     $supportedFolders = @(
         'Desktop'
@@ -962,23 +902,15 @@ function Invoke-ProfMigCopy {
         $additionalFolders = @($Configuration.AdditionalFolders)
     }
 
-    # -----------------------------------------------------------------------
-    # Result collections
-    # -----------------------------------------------------------------------
-
     $components             = @()
     $migrationErrors        = @()
     $migrationSkippedItems  = @()
     $migrationExcludedItems = @()
-
-    # -----------------------------------------------------------------------
-    # Standard folders
-    # -----------------------------------------------------------------------
+    $permissionResults      = @()
 
     foreach ($folder in $selectedFolders) {
 
         if ($folder -notin $supportedFolders) {
-
             $migrationErrors += New-ProfMigCopyError `
                 -Component $folder `
                 -SourceFile $null `
@@ -990,13 +922,45 @@ function Invoke-ProfMigCopy {
 
         Write-Verbose "Starting profile component: $folder"
 
+        $destinationComponentPath = Join-Path `
+            -Path $resolvedDestination `
+            -ChildPath $folder
+
         $componentResult = Copy-ProfMigComponent `
             -Component $folder `
             -SourcePath (Join-Path $resolvedSource $folder) `
-            -DestinationPath (Join-Path $resolvedDestination $folder) `
+            -DestinationPath $destinationComponentPath `
             -Exclusions $exclusions
 
         $components += $componentResult
+
+        if (Test-Path -LiteralPath $destinationComponentPath -PathType Container) {
+            $permissionResult = Repair-ProfMigDestinationPermissions `
+                -Path $destinationComponentPath `
+                -DestinationSid $destinationSid `
+                -SourceSid $sourceSid `
+                -AllowInheritanceRepair
+
+            $permissionResults += $permissionResult
+
+            if (-not $permissionResult.Success) {
+                $permissionMessage = if ($permissionResult.Error) {
+                    $permissionResult.Error
+                }
+                else {
+                    'Destination permissions remain invalid after remediation.'
+                }
+
+                $migrationErrors += New-ProfMigCopyError `
+                    -Component $folder `
+                    -SourceFile $null `
+                    -DestinationFile $destinationComponentPath `
+                    -ErrorMessage (
+                        "Permission validation or repair failed: {0}" -f `
+                            $permissionMessage
+                    )
+            }
+        }
 
         if ($componentResult.SkippedItems.Count -gt 0) {
             $migrationSkippedItems += $componentResult.SkippedItems
@@ -1011,14 +975,9 @@ function Invoke-ProfMigCopy {
         }
     }
 
-    # -----------------------------------------------------------------------
-    # Additional folders
-    # -----------------------------------------------------------------------
-
     foreach ($folder in $additionalFolders) {
 
         if (-not (Test-ProfMigRelativeFolder -Path $folder)) {
-
             $migrationErrors += New-ProfMigCopyError `
                 -Component $folder `
                 -SourceFile $null `
@@ -1031,7 +990,6 @@ function Invoke-ProfMigCopy {
         $normalizedFolder = $folder.Replace('/', '\').Trim('\')
 
         if ($normalizedFolder -in $selectedFolders) {
-
             $migrationErrors += New-ProfMigCopyError `
                 -Component $normalizedFolder `
                 -SourceFile $null `
@@ -1046,13 +1004,45 @@ function Invoke-ProfMigCopy {
 
         Write-Verbose "Starting additional component: $normalizedFolder"
 
+        $destinationComponentPath = Join-Path `
+            -Path $resolvedDestination `
+            -ChildPath $normalizedFolder
+
         $componentResult = Copy-ProfMigComponent `
             -Component $normalizedFolder `
             -SourcePath (Join-Path $resolvedSource $normalizedFolder) `
-            -DestinationPath (Join-Path $resolvedDestination $normalizedFolder) `
+            -DestinationPath $destinationComponentPath `
             -Exclusions $exclusions
 
         $components += $componentResult
+
+        if (Test-Path -LiteralPath $destinationComponentPath -PathType Container) {
+            $permissionResult = Repair-ProfMigDestinationPermissions `
+                -Path $destinationComponentPath `
+                -DestinationSid $destinationSid `
+                -SourceSid $sourceSid `
+                -AllowInheritanceRepair
+
+            $permissionResults += $permissionResult
+
+            if (-not $permissionResult.Success) {
+                $permissionMessage = if ($permissionResult.Error) {
+                    $permissionResult.Error
+                }
+                else {
+                    'Destination permissions remain invalid after remediation.'
+                }
+
+                $migrationErrors += New-ProfMigCopyError `
+                    -Component $normalizedFolder `
+                    -SourceFile $null `
+                    -DestinationFile $destinationComponentPath `
+                    -ErrorMessage (
+                        "Permission validation or repair failed: {0}" -f `
+                            $permissionMessage
+                    )
+            }
+        }
 
         if ($componentResult.SkippedItems.Count -gt 0) {
             $migrationSkippedItems += $componentResult.SkippedItems
@@ -1067,10 +1057,6 @@ function Invoke-ProfMigCopy {
         }
     }
 
-    # -----------------------------------------------------------------------
-    # Totals
-    # -----------------------------------------------------------------------
-
     $totalFilesSelected = 0
     $totalFilesCopied   = 0
     $totalFilesSkipped  = 0
@@ -1079,7 +1065,6 @@ function Invoke-ProfMigCopy {
     $totalBytesCopied   = [int64]0
 
     foreach ($component in $components) {
-
         $totalFilesSelected += $component.FilesSelected
         $totalFilesCopied   += $component.FilesCopied
         $totalFilesSkipped  += $component.FilesSkipped
@@ -1088,18 +1073,39 @@ function Invoke-ProfMigCopy {
         $totalBytesCopied   += $component.BytesCopied
     }
 
-    $totals = [PSCustomObject]@{
-        FilesSelected = $totalFilesSelected
-        FilesCopied   = $totalFilesCopied
-        FilesSkipped  = $totalFilesSkipped
-        FilesExcluded = $totalFilesExcluded
-        FilesFailed   = $totalFilesFailed
-        BytesCopied   = $totalBytesCopied
-    }
+    $permissionsChecked = @($permissionResults).Count
 
-    # -----------------------------------------------------------------------
-    # Overall status
-    # -----------------------------------------------------------------------
+    $permissionsRepaired = @(
+        $permissionResults |
+            Where-Object { $_.Changed }
+    ).Count
+
+    $permissionErrors = @(
+        $permissionResults |
+            Where-Object { -not $_.Success }
+    ).Count
+
+    $permissionWarnings = @(
+        $permissionResults |
+            Where-Object {
+                $_.Success -and
+                $_.ValidationAfter -and
+                @($_.ValidationAfter.Findings).Count -gt 0
+            }
+    ).Count
+
+    $totals = [PSCustomObject]@{
+        FilesSelected       = $totalFilesSelected
+        FilesCopied         = $totalFilesCopied
+        FilesSkipped        = $totalFilesSkipped
+        FilesExcluded       = $totalFilesExcluded
+        FilesFailed         = $totalFilesFailed
+        BytesCopied         = $totalBytesCopied
+        PermissionsChecked  = $permissionsChecked
+        PermissionsRepaired = $permissionsRepaired
+        PermissionWarnings  = $permissionWarnings
+        PermissionErrors    = $permissionErrors
+    }
 
     $failedComponents = @(
         $components |
@@ -1118,13 +1124,15 @@ function Invoke-ProfMigCopy {
 
     if (
         $failedComponents.Count -gt 0 -or
-        $migrationErrors.Count -gt 0
+        $migrationErrors.Count -gt 0 -or
+        $permissionErrors -gt 0
     ) {
         $overallStatus = 'CompletedWithErrors'
     }
     elseif (
         $warningComponents.Count -gt 0 -or
-        $migrationSkippedItems.Count -gt 0
+        $migrationSkippedItems.Count -gt 0 -or
+        $permissionWarnings -gt 0
     ) {
         $overallStatus = 'CompletedWithWarnings'
     }
@@ -1137,17 +1145,20 @@ function Invoke-ProfMigCopy {
     return [PSCustomObject]@{
         SourceProfile      = $resolvedSource
         DestinationProfile = $resolvedDestination
-
+        SourceSid          = $sourceSid
+        DestinationSid     = $destinationSid
         StartedAt          = $migrationStartedAt
         CompletedAt        = $migrationCompletedAt
         Duration           = ($migrationCompletedAt - $migrationStartedAt)
-
         Status             = $overallStatus
-
         Validation         = $validation
         Totals             = $totals
         Components         = @($components)
-
+        PermissionsChecked = $permissionsChecked
+        PermissionsRepaired = $permissionsRepaired
+        PermissionWarnings = $permissionWarnings
+        PermissionErrors   = $permissionErrors
+        PermissionResults  = @($permissionResults)
         SkippedItems       = @($migrationSkippedItems)
         ExcludedItems      = @($migrationExcludedItems)
         Errors             = @($migrationErrors)
@@ -1182,7 +1193,6 @@ function Invoke-ProfMigFileCopy {
                 -PathType Leaf
         )
     ) {
-
         $completedAt = Get-Date
 
         return [PSCustomObject]@{
@@ -1218,7 +1228,6 @@ function Invoke-ProfMigFileCopy {
             -ErrorAction Stop
     }
     catch {
-
         $completedAt = Get-Date
 
         return [PSCustomObject]@{
@@ -1254,7 +1263,6 @@ function Invoke-ProfMigFileCopy {
         -Application $Component
 
     if ($exclusionResult.Excluded) {
-
         $completedAt = Get-Date
 
         $excludedItem = [PSCustomObject]@{
