@@ -125,6 +125,46 @@ function Format-ProfMigReportItem {
         'Unknown error'
     }
 
+    $critical = if (
+        $Item.PSObject.Properties.Name -contains 'Critical' -and
+        $null -ne $Item.Critical
+    ) {
+        [string][bool]$Item.Critical
+    }
+    else {
+        'Unknown'
+    }
+
+    $retryable = if (
+        $Item.PSObject.Properties.Name -contains 'Retryable' -and
+        $null -ne $Item.Retryable
+    ) {
+        [string][bool]$Item.Retryable
+    }
+    else {
+        'Unknown'
+    }
+
+    $retryCount = if (
+        $Item.PSObject.Properties.Name -contains 'RetryCount' -and
+        $null -ne $Item.RetryCount
+    ) {
+        [string]$Item.RetryCount
+    }
+    else {
+        'Unknown'
+    }
+
+    $exceptionType = if (
+        $Item.PSObject.Properties.Name -contains 'ExceptionType' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.ExceptionType)
+    ) {
+        [string]$Item.ExceptionType
+    }
+    else {
+        'Unknown'
+    }
+
     # -----------------------------------------------------------------------
     # Format item
     # -----------------------------------------------------------------------
@@ -153,10 +193,15 @@ function Format-ProfMigReportItem {
         'Failed' {
 
             return @"
-- Component   : $component
-  Source      : $source
-  Destination : $destination
-  Error       : $errorMessage
+- Component      : $component
+  Source         : $source
+  Destination    : $destination
+  Reason         : $reason
+  Critical       : $critical
+  Retryable      : $retryable
+  Retry count    : $retryCount
+  Exception type : $exceptionType
+  Error          : $errorMessage
 "@
         }
     }
