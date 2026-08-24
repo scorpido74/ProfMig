@@ -332,6 +332,26 @@ function Get-ProfMigFileErrorClassification {
     }
     elseif (
         $classificationException -is
+        [System.Management.Automation.ItemNotFoundException]
+    ) {
+
+        switch ($Operation) {
+
+            'Enumerate' {
+                $reason = 'SourceDirectoryNotFound'
+            }
+
+            'Read' {
+                $reason = 'SourceNotFound'
+            }
+
+            default {
+                $reason = 'SourceNotFound'
+            }
+        }
+    }
+    elseif (
+        $classificationException -is
         [System.IO.PathTooLongException]
     ) {
 
@@ -923,6 +943,10 @@ function Copy-ProfMigComponent {
             }
             catch {
 
+                $classification = Get-ProfMigFileErrorClassification `
+                    -Exception $_.Exception `
+                    -Operation Enumerate
+
                 $filesFailed++
 
                 $errors += New-ProfMigCopyError `
@@ -932,7 +956,12 @@ function Copy-ProfMigComponent {
                     -ErrorMessage (
                         "Unable to enumerate directory: " +
                         $_.Exception.Message
-                    )
+                    ) `
+                    -Reason $classification.Reason `
+                    -Critical $classification.Critical `
+                    -Retryable $classification.Retryable `
+                    -RetryCount 0 `
+                    -ExceptionType $classification.ExceptionType
 
                 continue
             }
