@@ -466,6 +466,57 @@ function ConvertTo-ProfMigExtendedPath {
 }
 
 # ---------------------------------------------------------------------------
+# Internal function: Test-ProfMigFileExists
+# ---------------------------------------------------------------------------
+
+function Test-ProfMigFileExists {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    try {
+
+        $extendedPath = ConvertTo-ProfMigExtendedPath `
+            -Path $Path
+
+        return [System.IO.File]::Exists($extendedPath)
+    }
+    catch {
+        return $false
+    }
+}
+
+
+# ---------------------------------------------------------------------------
+# Internal function: Get-ProfMigFileInfo
+# ---------------------------------------------------------------------------
+
+function Get-ProfMigFileInfo {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    $extendedPath = ConvertTo-ProfMigExtendedPath `
+        -Path $Path
+
+    if (-not [System.IO.File]::Exists($extendedPath)) {
+        throw [System.IO.FileNotFoundException]::new(
+            'Source file does not exist.',
+            $Path
+        )
+    }
+
+    return [System.IO.FileInfo]::new($extendedPath)
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal function: Copy-ProfMigSingleFile
 # ---------------------------------------------------------------------------
 
@@ -1561,13 +1612,7 @@ function Invoke-ProfMigFileCopy {
 
     $startedAt = Get-Date
 
-    if (
-        -not (
-            Test-Path `
-                -LiteralPath $SourceFile `
-                -PathType Leaf
-        )
-    ) {
+    if (-not (Test-ProfMigFileExists -Path $SourceFile)) {
 
         $completedAt = Get-Date
 
@@ -1592,18 +1637,25 @@ function Invoke-ProfMigFileCopy {
                     -Component $Component `
                     -SourceFile $SourceFile `
                     -DestinationFile $DestinationFile `
-                    -ErrorMessage 'Source file does not exist.'
+                    -ErrorMessage 'Source file does not exist.' `
+                    -Reason 'SourceNotFound' `
+                    -Critical $false `
+                    -Retryable $false `
+                    -RetryCount 0 `
+                    -ExceptionType 'System.IO.FileNotFoundException'
             )
         }
     }
 
     try {
-        $sourceItem = Get-Item `
-            -LiteralPath $SourceFile `
-            -Force `
-            -ErrorAction Stop
+        $sourceItem = Get-ProfMigFileInfo `
+            -Path $SourceFile
     }
     catch {
+
+        $classification = Get-ProfMigFileErrorClassification `
+            -Exception $_.Exception `
+            -Operation Read
 
         $completedAt = Get-Date
 
@@ -1628,7 +1680,12 @@ function Invoke-ProfMigFileCopy {
                     -Component $Component `
                     -SourceFile $SourceFile `
                     -DestinationFile $DestinationFile `
-                    -ErrorMessage $_.Exception.Message
+                    -ErrorMessage $_.Exception.Message `
+                    -Reason $classification.Reason `
+                    -Critical $classification.Critical `
+                    -Retryable $classification.Retryable `
+                    -RetryCount 0 `
+                    -ExceptionType $classification.ExceptionType
             )
         }
     }
