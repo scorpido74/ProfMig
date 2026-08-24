@@ -433,6 +433,51 @@ function Get-ProfMigFileErrorClassification {
 }
 
 # ---------------------------------------------------------------------------
+# Internal function: Get-ProfMigDestinationErrorClassification
+# ---------------------------------------------------------------------------
+
+function Get-ProfMigDestinationErrorClassification {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [System.Exception]$Exception
+    )
+
+    $classificationException = $Exception
+
+    while ($null -ne $classificationException.InnerException) {
+        $classificationException = $classificationException.InnerException
+    }
+
+    if (
+        $classificationException -is
+        [System.Management.Automation.DriveNotFoundException]
+    ) {
+        return [PSCustomObject]@{
+            Reason        = 'DestinationUnavailable'
+            Retryable     = $false
+            Critical      = $true
+            ExceptionType = $classificationException.GetType().FullName
+            HResult       = $classificationException.HResult
+        }
+    }
+
+    $classification = Get-ProfMigFileErrorClassification `
+        -Exception $Exception `
+        -Operation Write
+
+    return [PSCustomObject]@{
+        Reason        = $classification.Reason
+        Retryable     = $classification.Retryable
+        Critical      = $classification.Critical
+        ExceptionType = $classification.ExceptionType
+        HResult       = $classification.HResult
+    }
+}
+
+
+# ---------------------------------------------------------------------------
 # Internal function: ConvertTo-ProfMigExtendedPath
 # ---------------------------------------------------------------------------
 
@@ -933,6 +978,9 @@ function Copy-ProfMigComponent {
         }
         catch {
 
+            $classification = Get-ProfMigDestinationErrorClassification `
+                -Exception $_.Exception
+
             $componentCompletedAt = Get-Date
 
             return [PSCustomObject]@{
@@ -961,7 +1009,12 @@ function Copy-ProfMigComponent {
                         -Component $Component `
                         -SourceFile $SourcePath `
                         -DestinationFile $DestinationPath `
-                        -ErrorMessage $_.Exception.Message
+                        -ErrorMessage $_.Exception.Message `
+                        -Reason $classification.Reason `
+                        -Critical $classification.Critical `
+                        -Retryable $classification.Retryable `
+                        -RetryCount 0 `
+                        -ExceptionType $classification.ExceptionType
                 )
             }
         }
@@ -1340,6 +1393,7 @@ function Invoke-ProfMigCopy {
     $migrationErrors        = @()
     $migrationSkippedItems  = @()
     $migrationExcludedItems = @()
+    $criticalFailure        = $false
 
     # -----------------------------------------------------------------------
     # Resolve Windows Known Folders
@@ -1446,13 +1500,35 @@ function Invoke-ProfMigCopy {
         if ($componentResult.Errors.Count -gt 0) {
             $migrationErrors += $componentResult.Errors
         }
+
+        $criticalErrors = @(
+            $componentResult.Errors |
+                Where-Object {
+                    $_.Critical -eq $true
+                }
+        )
+
+        if ($criticalErrors.Count -gt 0) {
+
+            $criticalFailure = $true
+
+            Write-ProfMigCopyInfo `
+                -Message (
+                    "Critical migration failure in component '$folder'. " +
+                    "Further components will not be processed."
+                )
+
+            break
+        }
     }
 
     # -----------------------------------------------------------------------
     # Additional folders
     # -----------------------------------------------------------------------
 
-    foreach ($folder in $additionalFolders) {
+    if (-not $criticalFailure) {
+
+        foreach ($folder in $additionalFolders) {
 
         if (-not (Test-ProfMigRelativeFolder -Path $folder)) {
 
@@ -1501,6 +1577,27 @@ function Invoke-ProfMigCopy {
 
         if ($componentResult.Errors.Count -gt 0) {
             $migrationErrors += $componentResult.Errors
+        }
+
+        $criticalErrors = @(
+            $componentResult.Errors |
+                Where-Object {
+                    $_.Critical -eq $true
+                }
+        )
+
+        if ($criticalErrors.Count -gt 0) {
+
+            $criticalFailure = $true
+
+            Write-ProfMigCopyInfo `
+                -Message (
+                    "Critical migration failure in component " +
+                    "'$normalizedFolder'. Further components will not be processed."
+                )
+
+            break
+        }
         }
     }
 
@@ -1553,7 +1650,10 @@ function Invoke-ProfMigCopy {
             }
     )
 
-    if (
+    if ($criticalFailure) {
+        $overallStatus = 'Failed'
+    }
+    elseif (
         $failedComponents.Count -gt 0 -or
         $migrationErrors.Count -gt 0
     ) {
