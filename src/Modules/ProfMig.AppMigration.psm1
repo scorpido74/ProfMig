@@ -1486,52 +1486,142 @@ function ConvertTo-ProfMigApplicationCopyResult {
         }
     )
 
-    # Normalize errors. CopyEngine errors are already structured, while
-    # blocked pre-validation can return plain strings.
+    # -----------------------------------------------------------------------
+    # Normalize application migration errors
+    #
+    # CopyEngine errors may already contain the complete Sprint 3.6 error
+    # contract. Preserve that classification where available.
+    #
+    # Provider-specific errors and plain strings are normalized to
+    # ApplicationMigrationError so reporting receives one consistent model.
+    # -----------------------------------------------------------------------
+
     $normalizedErrors = @(
         foreach ($errorItem in @($ApplicationResult.Errors)) {
+
+            $timestamp = Get-Date
+            $category = 'ApplicationMigrationError'
+            $severity = 'Error'
+            $component = $ApplicationResult.ApplicationId
+            $sourceFile = $ApplicationResult.SourceProfile
+            $destinationFile = $ApplicationResult.DestinationProfile
+            $status = 'Failed'
+            $reason = 'ApplicationMigrationFailed'
+            $critical = $false
+            $retryable = $false
+            $retryCount = 0
+            $recoveryAction = 'Skip'
+            $exceptionType = $null
+            $message = $null
+
             if ($errorItem -is [string]) {
+                $message = $errorItem
+
                 [PSCustomObject]@{
-                    Component       = $ApplicationResult.ApplicationId
-                    SourceFile      = $ApplicationResult.SourceProfile
-                    DestinationFile = $ApplicationResult.DestinationProfile
-                    Error           = $errorItem
+                    Timestamp       = $timestamp
+                    Category        = $category
+                    Severity        = $severity
+                    Component       = $component
+                    SourceFile      = $sourceFile
+                    DestinationFile = $destinationFile
+                    Status          = $status
+                    Reason          = $reason
+                    Critical        = $critical
+                    Retryable       = $retryable
+                    RetryCount      = $retryCount
+                    RecoveryAction  = $recoveryAction
+                    ExceptionType   = $exceptionType
+                    Error           = $message
                 }
 
                 continue
             }
 
-            $component = $ApplicationResult.ApplicationId
-            $sourceFile = $null
-            $destinationFile = $ApplicationResult.DestinationProfile
-            $message = $null
+            if ($null -ne $errorItem.PSObject.Properties['Timestamp']) {
+                $timestamp = $errorItem.Timestamp
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['Category']) {
+                $category = [string]$errorItem.Category
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['Severity']) {
+                $severity = [string]$errorItem.Severity
+            }
 
             if ($null -ne $errorItem.PSObject.Properties['Component']) {
-                $component = $errorItem.Component
+                $component = [string]$errorItem.Component
             }
 
             if ($null -ne $errorItem.PSObject.Properties['SourceFile']) {
                 $sourceFile = $errorItem.SourceFile
             }
+            elseif ($null -ne $errorItem.PSObject.Properties['SourcePath']) {
+                $sourceFile = $errorItem.SourcePath
+            }
 
             if ($null -ne $errorItem.PSObject.Properties['DestinationFile']) {
                 $destinationFile = $errorItem.DestinationFile
             }
+            elseif ($null -ne $errorItem.PSObject.Properties['DestinationPath']) {
+                $destinationFile = $errorItem.DestinationPath
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['Status']) {
+                $status = [string]$errorItem.Status
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['Reason']) {
+                $reason = [string]$errorItem.Reason
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['Critical']) {
+                $critical = [bool]$errorItem.Critical
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['Retryable']) {
+                $retryable = [bool]$errorItem.Retryable
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['RetryCount']) {
+                $retryCount = [int]$errorItem.RetryCount
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['RecoveryAction']) {
+                $recoveryAction = [string]$errorItem.RecoveryAction
+            }
+
+            if ($null -ne $errorItem.PSObject.Properties['ExceptionType']) {
+                $exceptionType = $errorItem.ExceptionType
+            }
 
             if ($null -ne $errorItem.PSObject.Properties['Error']) {
-                $message = $errorItem.Error
+                $message = [string]$errorItem.Error
+            }
+            elseif ($null -ne $errorItem.PSObject.Properties['Message']) {
+                $message = [string]$errorItem.Message
             }
             elseif ($null -ne $errorItem.PSObject.Properties['Reason']) {
-                $message = $errorItem.Reason
+                $message = [string]$errorItem.Reason
             }
             else {
                 $message = [string]$errorItem
             }
 
             [PSCustomObject]@{
+                Timestamp       = $timestamp
+                Category        = $category
+                Severity        = $severity
                 Component       = $component
                 SourceFile      = $sourceFile
                 DestinationFile = $destinationFile
+                Status          = $status
+                Reason          = $reason
+                Critical        = $critical
+                Retryable       = $retryable
+                RetryCount      = $retryCount
+                RecoveryAction  = $recoveryAction
+                ExceptionType   = $exceptionType
                 Error           = $message
             }
         }
