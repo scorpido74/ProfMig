@@ -109,6 +109,36 @@ function Format-ProfMigReportItem {
         'Unknown'
     }
 
+    $category = if (
+        $Item.PSObject.Properties.Name -contains 'Category' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.Category)
+    ) {
+        [string]$Item.Category
+    }
+    else {
+        'Unknown'
+    }
+
+    $severity = if (
+        $Item.PSObject.Properties.Name -contains 'Severity' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.Severity)
+    ) {
+        [string]$Item.Severity
+    }
+    else {
+        'Unknown'
+    }
+
+    $recoveryAction = if (
+        $Item.PSObject.Properties.Name -contains 'RecoveryAction' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.RecoveryAction)
+    ) {
+        [string]$Item.RecoveryAction
+    }
+    else {
+        'Unknown'
+    }
+
     $errorMessage = if (
         $Item.PSObject.Properties.Name -contains 'Error' -and
         -not [string]::IsNullOrWhiteSpace([string]$Item.Error)
@@ -193,15 +223,18 @@ function Format-ProfMigReportItem {
         'Failed' {
 
             return @"
-- Component      : $component
-  Source         : $source
-  Destination    : $destination
-  Reason         : $reason
-  Critical       : $critical
-  Retryable      : $retryable
-  Retry count    : $retryCount
-  Exception type : $exceptionType
-  Error          : $errorMessage
+- Component       : $component
+  Source          : $source
+  Destination     : $destination
+  Category        : $category
+  Severity        : $severity
+  Reason          : $reason
+  Recovery action : $recoveryAction
+  Critical        : $critical
+  Retryable       : $retryable
+  Retry count     : $retryCount
+  Exception type  : $exceptionType
+  Error           : $errorMessage
 "@
         }
     }
@@ -493,8 +526,9 @@ function ConvertTo-ProfMigMigrationResult {
     # Human-readable warnings and errors
     # -----------------------------------------------------------------------
 
-    $warnings = @()
-    $errors   = @()
+    $warnings         = @()
+    $errors           = @()
+    $structuredErrors = @()
 
     if ($profileFilesSkipped -gt 0) {
 
@@ -530,21 +564,48 @@ function ConvertTo-ProfMigMigrationResult {
 
     foreach ($errorItem in @($CopyResult.Errors)) {
 
-        $componentName = if ($errorItem.Component) {
-            $errorItem.Component
+        if ($null -eq $errorItem) {
+            continue
+        }
+
+        $structuredErrors += $errorItem
+
+        $componentName = if (
+            $errorItem.PSObject.Properties.Name -contains 'Component' -and
+            -not [string]::IsNullOrWhiteSpace([string]$errorItem.Component)
+        ) {
+            [string]$errorItem.Component
         }
         else {
             'Unknown component'
         }
 
-        $errorMessage = if ($errorItem.Error) {
-            $errorItem.Error
+        $category = if (
+            $errorItem.PSObject.Properties.Name -contains 'Category' -and
+            -not [string]::IsNullOrWhiteSpace([string]$errorItem.Category)
+        ) {
+            [string]$errorItem.Category
+        }
+        else {
+            'Unknown'
+        }
+
+        $errorMessage = if (
+            $errorItem.PSObject.Properties.Name -contains 'Error' -and
+            -not [string]::IsNullOrWhiteSpace([string]$errorItem.Error)
+        ) {
+            [string]$errorItem.Error
         }
         else {
             'Unknown error'
         }
 
-        $errors += "$componentName : $errorMessage"
+        $errors += (
+            '{0} [{1}] : {2}' -f
+            $componentName,
+            $category,
+            $errorMessage
+        )
     }
 
     foreach ($applicationResult in $applicationResults) {
@@ -703,6 +764,7 @@ function ConvertTo-ProfMigMigrationResult {
 
         Warnings            = @($warnings)
         Errors              = @($errors)
+        StructuredErrors    = @($structuredErrors)
 
         Status              = $status
 
