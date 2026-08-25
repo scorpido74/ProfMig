@@ -1288,11 +1288,21 @@ function Invoke-ProfMigCopy {
     $destinationProfileSid = Get-ProfMigProfileSid `
         -ProfilePath $resolvedDestination
 
-    if (-not $destinationProfileSid.Success) {
-        throw (
+       if (-not $destinationProfileSid.Success) {
+
+        $message = (
             "Unable to determine destination profile SID for '{0}'. {1}" -f `
                 $resolvedDestination,
                 $destinationProfileSid.Error
+        )
+
+        throw (
+            New-ProfMigException `
+                -Message $message `
+                -Category 'ValidationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'DestinationProfileSidUnavailable'
         )
     }
 

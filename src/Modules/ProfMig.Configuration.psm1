@@ -1,31 +1,86 @@
+<#
+.SYNOPSIS
+    Configuration handling for ProfMig.
+
+.DESCRIPTION
+    Loads and exposes the ProfMig configuration.
+
+.NOTES
+    Project : ProfMig
+    Module  : ProfMig.Configuration
 #>
 
 Set-StrictMode -Version Latest
 
-$script:Config = $null
+# ============================================================================
+# Import-ProfMigConfiguration
+# ============================================================================
 
 function Import-ProfMigConfiguration {
 
-[CmdletBinding()]
-param(
-    [Parameter(Mandatory)]
-    [string]$Path
-)
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Path
+    )
 
-if (-not (Test-Path $Path)) {
+    if (
+        -not (
+            Test-Path `
+                -LiteralPath $Path `
+                -PathType Leaf
+        )
+    ) {
 
-    throw "Configuration file not found: $Path"
+        throw (
+            New-ProfMigException `
+                -Message "Configuration file not found: $Path" `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'ConfigurationFileNotFound'
+        )
+    }
 
+    try {
+
+        $script:Config = Import-PowerShellDataFile `
+            -LiteralPath $Path `
+            -ErrorAction Stop
+    }
+    catch {
+
+        throw (
+            New-ProfMigException `
+                -Message "Configuration file could not be loaded: $Path" `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'ConfigurationLoadFailed' `
+                -InnerException $_.Exception
+        )
+    }
+
+    return $script:Config
 }
 
-$script:Config = Import-PowerShellDataFile -Path $Path
 
-return $script:Config
-}
+# ============================================================================
+# Get-ProfMigConfiguration
+# ============================================================================
 
 function Get-ProfMigConfiguration {
 
-return $script:Config
+    return $script:Config
 }
 
-Export-ModuleMember -Function *
+
+# ============================================================================
+# Module exports
+# ============================================================================
+
+Export-ModuleMember -Function @(
+    'Import-ProfMigConfiguration',
+    'Get-ProfMigConfiguration'
+)
