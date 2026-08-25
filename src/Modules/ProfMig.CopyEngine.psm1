@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Core copy engine for ProfMig.
 
@@ -263,7 +263,71 @@ function New-ProfMigCopyError {
         [string]$ExceptionType
     )
 
+    switch ($Reason) {
+
+        'AccessDenied' {
+            $category = 'PermissionError'
+        }
+
+        'FileLocked' {
+            $category = 'FileLocked'
+        }
+
+        {
+            $_ -in @(
+                'SourceNotFound',
+                'SourceDirectoryNotFound',
+                'ReadError'
+            )
+        } {
+            $category = 'SourceReadError'
+        }
+
+        {
+            $_ -in @(
+                'WriteError',
+                'DestinationUnavailable'
+            )
+        } {
+            $category = 'DestinationWriteError'
+        }
+
+        {
+            $_ -in @(
+                'PathTooLong',
+                'InvalidPath'
+            )
+        } {
+            if ([string]::IsNullOrWhiteSpace($DestinationFile)) {
+                $category = 'SourceReadError'
+            }
+            else {
+                $category = 'DestinationWriteError'
+            }
+        }
+
+        default {
+            $category = 'UnexpectedError'
+        }
+    }
+
+    if ($Critical) {
+        $severity = 'Critical'
+        $recoveryAction = 'Stop'
+    }
+    elseif ($Retryable) {
+        $severity = 'Warning'
+        $recoveryAction = 'RetryThenSkip'
+    }
+    else {
+        $severity = 'Error'
+        $recoveryAction = 'Skip'
+    }
+
     return [PSCustomObject]@{
+        Timestamp       = Get-Date
+        Category        = $category
+        Severity        = $severity
         Component       = $Component
         SourceFile      = $SourceFile
         DestinationFile = $DestinationFile
@@ -272,6 +336,7 @@ function New-ProfMigCopyError {
         Critical        = $Critical
         Retryable       = $Retryable
         RetryCount      = $RetryCount
+        RecoveryAction  = $recoveryAction
         ExceptionType   = $ExceptionType
         Error           = $ErrorMessage
     }
@@ -710,8 +775,65 @@ function Copy-ProfMigSingleFile {
     $sourceCopyPath = ConvertTo-ProfMigExtendedPath `
         -Path $File.FullName
 
+    $partialDestinationFile = $DestinationFile + '.profmig-partial'
+
     $destinationCopyPath = ConvertTo-ProfMigExtendedPath `
         -Path $DestinationFile
+
+    $partialDestinationCopyPath = ConvertTo-ProfMigExtendedPath `
+        -Path $partialDestinationFile
+
+    # -----------------------------------------------------------------------
+    # Remove abandoned ProfMig partial file
+    #
+    # A previous interrupted migration may have left a staging file behind.
+    # Only ProfMig's own staging file is removed. The final destination file
+    # is never removed or overwritten here.
+    # -----------------------------------------------------------------------
+
+    if ([System.IO.File]::Exists($partialDestinationCopyPath)) {
+
+        try {
+            [System.IO.File]::Delete($partialDestinationCopyPath)
+
+            Write-ProfMigCopyInfo `
+                -Message (
+                    "Removed abandoned partial file '$partialDestinationFile'."
+                )
+        }
+        catch {
+
+            $classification = Get-ProfMigFileErrorClassification `
+                -Exception $_.Exception `
+                -Operation Write
+
+            $result.Failed = 1
+
+            $result.Error = New-ProfMigCopyError `
+                -Component $Component `
+                -SourceFile $File.FullName `
+                -DestinationFile $DestinationFile `
+                -ErrorMessage $_.Exception.Message `
+                -Reason $classification.Reason `
+                -Critical $classification.Critical `
+                -Retryable $false `
+                -RetryCount 0 `
+                -ExceptionType $classification.ExceptionType
+
+            return [PSCustomObject]$result
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Copy file with bounded retry using a staging file
+    #
+    # RetryCount defines retries after the initial attempt.
+    # RetryCount 3 therefore means a maximum of four copy attempts.
+    #
+    # Data is first copied to a ProfMig-owned partial file. The staging file
+    # is promoted to the final destination only after the copy completed
+    # successfully.
+    # -----------------------------------------------------------------------
 
     $retryAttempts = 0
 
@@ -721,8 +843,13 @@ function Copy-ProfMigSingleFile {
 
             [System.IO.File]::Copy(
                 $sourceCopyPath,
-                $destinationCopyPath,
+                $partialDestinationCopyPath,
                 $false
+            )
+
+            [System.IO.File]::Move(
+                $partialDestinationCopyPath,
+                $destinationCopyPath
             )
 
             $result.Copied = 1
@@ -733,6 +860,23 @@ function Copy-ProfMigSingleFile {
         catch {
 
             $copyException = $_.Exception
+
+            # Best-effort cleanup of ProfMig's staging file. Cleanup failure
+            # must not replace the original copy exception. A remaining
+            # partial file will be detected again on a re-run.
+            if ([System.IO.File]::Exists($partialDestinationCopyPath)) {
+
+                try {
+                    [System.IO.File]::Delete($partialDestinationCopyPath)
+                }
+                catch {
+                    Write-ProfMigCopyInfo `
+                        -Message (
+                            "Unable to remove partial file " +
+                            "'$partialDestinationFile'."
+                        )
+                }
+            }
 
             $classification = Get-ProfMigFileErrorClassification `
                 -Exception $copyException `
@@ -1288,7 +1432,7 @@ function Invoke-ProfMigCopy {
     $destinationProfileSid = Get-ProfMigProfileSid `
         -ProfilePath $resolvedDestination
 
-       if (-not $destinationProfileSid.Success) {
+    if (-not $destinationProfileSid.Success) {
 
         $message = (
             "Unable to determine destination profile SID for '{0}'. {1}" -f `
