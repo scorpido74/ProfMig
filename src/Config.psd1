@@ -19,6 +19,11 @@
         }
     }
 
+    Verification = @{
+        Level         = 'Standard'
+        HashAlgorithm = 'SHA256'
+    }
+
     ExcludedProfiles = @(
         'All Users'
         'Default'
