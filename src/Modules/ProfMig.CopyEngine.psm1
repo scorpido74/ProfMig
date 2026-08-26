@@ -75,6 +75,19 @@ Import-Module `
     -Force `
     -ErrorAction Stop
 
+$verificationModulePath = Join-Path `
+    -Path $PSScriptRoot `
+    -ChildPath 'ProfMig.Verification.psm1'
+
+if (-not (Test-Path -LiteralPath $verificationModulePath)) {
+    throw "ProfMig verification module not found: $verificationModulePath"
+}
+
+Import-Module `
+    -Name $verificationModulePath `
+    -Force `
+    -ErrorAction Stop
+
 # ---------------------------------------------------------------------------
 # Internal function: Write-ProfMigCopyInfo
 # ---------------------------------------------------------------------------
@@ -666,7 +679,15 @@ function Copy-ProfMigSingleFile {
 
         [Parameter()]
         [ValidateRange(0, 60)]
-        [int]$RetryDelaySeconds = 2
+        [int]$RetryDelaySeconds = 2,
+
+        [Parameter()]
+        [ValidateSet('Standard', 'Hash')]
+        [string]$VerificationLevel = 'Standard',
+
+        [Parameter()]
+        [ValidateSet('SHA256', 'SHA384', 'SHA512')]
+        [string]$HashAlgorithm = 'SHA256'
     )
 
     $result = [ordered]@{
@@ -861,14 +882,16 @@ function Copy-ProfMigSingleFile {
                     -Component $Component `
                     -SourceFile $File.FullName `
                     -DestinationFile $DestinationFile `
-                    -VerificationLevel 'Standard'
+                    -VerificationLevel $VerificationLevel `
+                    -HashAlgorithm $HashAlgorithm
             }
             catch {
                 $result.VerificationResult = New-ProfMigVerificationResult `
                     -Component $Component `
                     -SourceFile $File.FullName `
                     -DestinationFile $DestinationFile `
-                    -VerificationLevel 'Standard' `
+                    -VerificationLevel $VerificationLevel `
+                    -HashAlgorithm $HashAlgorithm `
                     -Status 'Failed' `
                     -Reason 'VerificationReadError'
             }
@@ -960,7 +983,15 @@ function Copy-ProfMigComponent {
         [string]$DestinationPath,
 
         [Parameter()]
-        [string[]]$Exclusions = @()
+        [string[]]$Exclusions = @(),
+
+        [Parameter()]
+        [ValidateSet('Standard', 'Hash')]
+        [string]$VerificationLevel = 'Standard',
+
+        [Parameter()]
+        [ValidateSet('SHA256', 'SHA384', 'SHA512')]
+        [string]$HashAlgorithm = 'SHA256'
     )
 
     $componentStartedAt = Get-Date
@@ -1080,7 +1111,9 @@ function Copy-ProfMigComponent {
                 -File $sourceItem `
                 -DestinationFile $DestinationPath `
                 -RelativePath $relativePath `
-                -Exclusions $Exclusions
+                -Exclusions $Exclusions `
+                -VerificationLevel $VerificationLevel `
+                -HashAlgorithm $HashAlgorithm
 
             $filesSelected += $fileResult.Selected
             $filesCopied   += $fileResult.Copied
@@ -1090,8 +1123,8 @@ function Copy-ProfMigComponent {
             $bytesCopied   += $fileResult.BytesCopied
 
             if ($null -ne $fileResult.VerificationResult) {
-            $verificationResults += $fileResult.VerificationResult
-        }
+                $verificationResults += $fileResult.VerificationResult
+            }
 
             if ($null -ne $fileResult.SkippedItem) {
                 $skippedItems += $fileResult.SkippedItem
@@ -1316,7 +1349,9 @@ function Copy-ProfMigComponent {
                     -File $child `
                     -DestinationFile $destinationFile `
                     -RelativePath $relativePath `
-                    -Exclusions $Exclusions
+                    -Exclusions $Exclusions `
+                    -VerificationLevel $VerificationLevel `
+                    -HashAlgorithm $HashAlgorithm
 
                 $filesSelected += $fileResult.Selected
                 $filesCopied   += $fileResult.Copied
@@ -1439,14 +1474,24 @@ function Invoke-ProfMigComponentCopy {
         [string]$DestinationPath,
 
         [Parameter()]
-        [string[]]$Exclusions = @()
+        [string[]]$Exclusions = @(),
+
+        [Parameter()]
+        [ValidateSet('Standard', 'Hash')]
+        [string]$VerificationLevel = 'Standard',
+
+        [Parameter()]
+        [ValidateSet('SHA256', 'SHA384', 'SHA512')]
+        [string]$HashAlgorithm = 'SHA256'
     )
 
     return Copy-ProfMigComponent `
         -Component $Component `
         -SourcePath $SourcePath `
         -DestinationPath $DestinationPath `
-        -Exclusions $Exclusions
+        -Exclusions $Exclusions `
+        -VerificationLevel $VerificationLevel `
+        -HashAlgorithm $HashAlgorithm
 }
 
 
@@ -1555,6 +1600,54 @@ function Invoke-ProfMigCopy {
         $exclusions = @($Configuration.Exclusions)
     }
 
+    $verificationLevel = 'Standard'
+    $hashAlgorithm = 'SHA256'
+
+    if (
+        $Configuration.ContainsKey('Verification') -and
+        $null -ne $Configuration.Verification
+    ) {
+        if (
+            $Configuration.Verification.ContainsKey('Level') -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Configuration.Verification.Level
+            )
+        ) {
+            $verificationLevel = [string]$Configuration.Verification.Level
+        }
+
+        if (
+            $Configuration.Verification.ContainsKey('HashAlgorithm') -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Configuration.Verification.HashAlgorithm
+            )
+        ) {
+            $hashAlgorithm = [string]$Configuration.Verification.HashAlgorithm
+        }
+    }
+
+    if (-not (Test-ProfMigVerificationLevel -Level $verificationLevel)) {
+        throw (
+            New-ProfMigException `
+                -Message "Invalid verification level: $verificationLevel" `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'InvalidVerificationLevel'
+        )
+    }
+
+    if ($hashAlgorithm -notin @('SHA256', 'SHA384', 'SHA512')) {
+        throw (
+            New-ProfMigException `
+                -Message "Invalid hash algorithm: $hashAlgorithm" `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'InvalidHashAlgorithm'
+        )
+    }
+
     $additionalFolders = @()
 
     if (
@@ -1640,10 +1733,15 @@ function Invoke-ProfMigCopy {
                 FilesCopied     = 0
                 FilesSkipped    = 0
                 FilesExcluded   = 0
-                FilesFailed     = 0
-                BytesCopied     = [int64]0
+                FilesFailed          = 0
+                BytesCopied          = [int64]0
+                FilesVerified        = 0
+                BytesVerified        = [int64]0
+                VerificationFailures = 0
+                VerificationStatus   = 'NotApplicable'
+                VerificationResults  = @()
 
-                Status          = 'CloudManaged'
+                Status               = 'CloudManaged'
 
                 SkippedItems    = @()
                 ExcludedItems   = @()
@@ -1664,7 +1762,9 @@ function Invoke-ProfMigCopy {
             -Component $folder `
             -SourcePath (Join-Path $resolvedSource $folder) `
             -DestinationPath $destinationComponentPath `
-            -Exclusions $exclusions
+            -Exclusions $exclusions `
+            -VerificationLevel $verificationLevel `
+            -HashAlgorithm $hashAlgorithm
 
         $components += $componentResult
 
@@ -1772,7 +1872,9 @@ function Invoke-ProfMigCopy {
             -Component $normalizedFolder `
             -SourcePath (Join-Path $resolvedSource $normalizedFolder) `
             -DestinationPath $destinationComponentPath `
-            -Exclusions $exclusions
+            -Exclusions $exclusions `
+            -VerificationLevel $verificationLevel `
+            -HashAlgorithm $hashAlgorithm
 
         $components += $componentResult
 
@@ -1842,8 +1944,11 @@ function Invoke-ProfMigCopy {
     $totalFilesCopied   = 0
     $totalFilesSkipped  = 0
     $totalFilesExcluded = 0
-    $totalFilesFailed   = 0
-    $totalBytesCopied   = [int64]0
+    $totalFilesFailed          = 0
+    $totalBytesCopied          = [int64]0
+    $totalFilesVerified        = 0
+    $totalBytesVerified        = [int64]0
+    $totalVerificationFailures = 0
 
     foreach ($component in $components) {
         $totalFilesSelected += $component.FilesSelected
@@ -1852,6 +1957,18 @@ function Invoke-ProfMigCopy {
         $totalFilesExcluded += $component.FilesExcluded
         $totalFilesFailed   += $component.FilesFailed
         $totalBytesCopied   += $component.BytesCopied
+
+        if ($component.PSObject.Properties['FilesVerified']) {
+            $totalFilesVerified += $component.FilesVerified
+        }
+
+        if ($component.PSObject.Properties['BytesVerified']) {
+            $totalBytesVerified += $component.BytesVerified
+        }
+
+        if ($component.PSObject.Properties['VerificationFailures']) {
+            $totalVerificationFailures += $component.VerificationFailures
+        }
     }
 
     $permissionsChecked = @($permissionResults).Count
@@ -1880,9 +1997,14 @@ function Invoke-ProfMigCopy {
         FilesCopied         = $totalFilesCopied
         FilesSkipped        = $totalFilesSkipped
         FilesExcluded       = $totalFilesExcluded
-        FilesFailed         = $totalFilesFailed
-        BytesCopied         = $totalBytesCopied
-        PermissionsChecked  = $permissionsChecked
+        FilesFailed          = $totalFilesFailed
+        BytesCopied          = $totalBytesCopied
+        FilesVerified        = $totalFilesVerified
+        BytesVerified        = $totalBytesVerified
+        VerificationFailures = $totalVerificationFailures
+        VerificationLevel    = $verificationLevel
+        HashAlgorithm        = $hashAlgorithm
+        PermissionsChecked   = $permissionsChecked
         PermissionsRepaired = $permissionsRepaired
         PermissionWarnings  = $permissionWarnings
         PermissionErrors    = $permissionErrors
@@ -1965,7 +2087,15 @@ function Invoke-ProfMigFileCopy {
         [string]$SourceFile,
 
         [Parameter(Mandatory)]
-        [string]$DestinationFile
+        [string]$DestinationFile,
+
+        [Parameter()]
+        [ValidateSet('Standard', 'Hash')]
+        [string]$VerificationLevel = 'Standard',
+
+        [Parameter()]
+        [ValidateSet('SHA256', 'SHA384', 'SHA512')]
+        [string]$HashAlgorithm = 'SHA256'
     )
 
     $startedAt = Get-Date
@@ -2098,9 +2228,17 @@ function Invoke-ProfMigFileCopy {
         -File $sourceItem `
         -DestinationFile $DestinationFile `
         -RelativePath $relativePath `
-        -Exclusions @()
+        -Exclusions @() `
+        -VerificationLevel $VerificationLevel `
+        -HashAlgorithm $HashAlgorithm
 
-    if ($fileResult.Failed -gt 0) {
+    if (
+        $null -ne $fileResult.VerificationResult -and
+        -not $fileResult.VerificationResult.Verified
+    ) {
+        $status = 'CompletedWithErrors'
+    }
+    elseif ($fileResult.Failed -gt 0) {
         $status = 'CompletedWithErrors'
     }
     elseif ($fileResult.Skipped -gt 0) {
@@ -2138,9 +2276,31 @@ function Invoke-ProfMigFileCopy {
         FilesCopied     = $fileResult.Copied
         FilesSkipped    = $fileResult.Skipped
         FilesExcluded   = $fileResult.Excluded
-        FilesFailed     = $fileResult.Failed
-        BytesCopied     = $fileResult.BytesCopied
-        Status          = $status
+        FilesFailed          = $fileResult.Failed
+        BytesCopied          = $fileResult.BytesCopied
+        FilesVerified        = if (
+            $null -ne $fileResult.VerificationResult -and
+            $fileResult.VerificationResult.Verified
+        ) { 1 } else { 0 }
+        BytesVerified        = if (
+            $null -ne $fileResult.VerificationResult -and
+            $fileResult.VerificationResult.Verified
+        ) { [int64]$fileResult.VerificationResult.SourceSize } else { [int64]0 }
+        VerificationFailures = if (
+            $null -ne $fileResult.VerificationResult -and
+            -not $fileResult.VerificationResult.Verified
+        ) { 1 } else { 0 }
+        VerificationStatus   = if ($null -ne $fileResult.VerificationResult) {
+            $fileResult.VerificationResult.Status
+        } else {
+            'NotApplicable'
+        }
+        VerificationResults  = if ($null -ne $fileResult.VerificationResult) {
+            @($fileResult.VerificationResult)
+        } else {
+            @()
+        }
+        Status               = $status
         SkippedItems    = @($skippedItems)
         ExcludedItems   = @($excludedItems)
         Errors          = @($errors)

@@ -19,7 +19,7 @@
         }
     }
 
-        Verification = @{
+    Verification = @{
         Level         = 'Standard'
         HashAlgorithm = 'SHA256'
     }
