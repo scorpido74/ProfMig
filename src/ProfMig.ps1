@@ -51,7 +51,7 @@ try {
 
     $Config = Import-ProfMigConfiguration -Path $ConfigPath
 
-        if ($null -eq $Config) {
+    if ($null -eq $Config) {
 
         throw (
             New-ProfMigException `
@@ -89,8 +89,15 @@ try {
         )
     ) {
         throw (
-            'Application definition folder was not found: ' +
-            $ApplicationDefinitionFolder
+            New-ProfMigException `
+                -Message (
+                    'Application definition folder was not found: ' +
+                    $ApplicationDefinitionFolder
+                ) `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'ApplicationDefinitionFolderNotFound'
         )
     }
 
@@ -128,8 +135,15 @@ try {
         )
 
         throw (
-            'One or more application definitions are invalid: ' +
-            ($invalidFiles -join ', ')
+            New-ProfMigException `
+                -Message (
+                    'One or more application definitions are invalid: ' +
+                    ($invalidFiles -join ', ')
+                ) `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'InvalidApplicationDefinitions'
         )
     }
 
@@ -152,7 +166,7 @@ try {
 
 
         # -------------------------------------------------------------------------
-        # Initialize logging
+    # Initialize logging
         # -------------------------------------------------------------------------
 
         if ($Config.Paths -and $Config.Paths.Logs) {
@@ -175,14 +189,13 @@ try {
 
 
         # -------------------------------------------------------------------------
-        # Validate environment
+    # Validate environment
         # -------------------------------------------------------------------------
 
         Test-ProfMigEnvironment
 
-
         # -------------------------------------------------------------------------
-        # Display startup information
+    # Display startup information
         # -------------------------------------------------------------------------
 
         Show-ProfMigBanner
@@ -211,7 +224,14 @@ try {
 
 
     if ($Profiles.Count -eq 0) {
-        throw 'No Windows user profiles were found.'
+        throw (
+            New-ProfMigException `
+                -Message 'No Windows user profiles were found.' `
+                -Category 'ValidationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'NoUserProfilesFound'
+        )
     }
 
 
