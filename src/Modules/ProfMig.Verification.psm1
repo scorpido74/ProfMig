@@ -293,10 +293,126 @@ function New-ProfMigVerificationSummary {
     }
 }
 
+function Get-ProfMigVerificationSummary {
+    <#
+    .SYNOPSIS
+        Creates migration verification totals from copy and verification data.
+
+    .DESCRIPTION
+        Calculates file and byte totals for a migration component and determines
+        whether the component totals are internally consistent.
+
+        Verification failures are never silently treated as successful.
+    #>
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [object[]]$VerificationResults,
+
+        [Parameter(Mandatory)]
+        [long]$FilesSelected,
+
+        [Parameter(Mandatory)]
+        [long]$FilesCopied,
+
+        [Parameter()]
+        [long]$FilesSkipped = 0,
+
+        [Parameter()]
+        [long]$FilesFailed = 0,
+
+        [Parameter(Mandatory)]
+        [long]$BytesSelected,
+
+        [Parameter(Mandatory)]
+        [long]$BytesCopied
+    )
+
+    $results = @($VerificationResults)
+
+    $verifiedResults = @(
+        $results | Where-Object {
+            $_.Verified -eq $true
+        }
+    )
+
+    $failedVerificationResults = @(
+        $results | Where-Object {
+            $_.Status -eq 'Failed'
+        }
+    )
+
+    $filesVerified = [long]$verifiedResults.Count
+
+    $bytesVerified = [long](
+        (
+            $verifiedResults |
+                Measure-Object -Property DestinationSize -Sum
+        ).Sum
+    )
+
+    $verificationFailures = [long]$failedVerificationResults.Count
+
+    $summary = New-ProfMigVerificationSummary `
+        -FilesSelected $FilesSelected `
+        -FilesCopied $FilesCopied `
+        -FilesVerified $filesVerified `
+        -FilesSkipped $FilesSkipped `
+        -FilesFailed $FilesFailed `
+        -BytesSelected $BytesSelected `
+        -BytesCopied $BytesCopied `
+        -BytesVerified $bytesVerified `
+        -VerificationFailures $verificationFailures
+
+    $fileCountMatch = (
+        $FilesCopied -eq
+        ($filesVerified + $verificationFailures)
+    )
+
+    $byteCountMatch = (
+        $BytesCopied -eq $bytesVerified
+    )
+
+    $componentVerified = (
+        $verificationFailures -eq 0 -and
+        $FilesFailed -eq 0 -and
+        $fileCountMatch -and
+        $byteCountMatch
+    )
+
+    [pscustomobject]@{
+        PSTypeName           = 'ProfMig.ComponentVerificationSummary'
+
+        FilesSelected        = $summary.FilesSelected
+        FilesCopied          = $summary.FilesCopied
+        FilesVerified        = $summary.FilesVerified
+        FilesSkipped         = $summary.FilesSkipped
+        FilesFailed          = $summary.FilesFailed
+
+        BytesSelected        = $summary.BytesSelected
+        BytesCopied          = $summary.BytesCopied
+        BytesVerified        = $summary.BytesVerified
+
+        VerificationFailures = $summary.VerificationFailures
+
+        FileCountMatch       = $fileCountMatch
+        ByteCountMatch       = $byteCountMatch
+        Verified             = $componentVerified
+
+        Status = if ($componentVerified) {
+            'Success'
+        }
+        else {
+            'Failed'
+        }
+    }
+}
 
 Export-ModuleMember -Function @(
     'Test-ProfMigVerificationLevel'
     'New-ProfMigVerificationResult'
     'Test-ProfMigFileVerification'
     'New-ProfMigVerificationSummary'
+    'Get-ProfMigVerificationSummary'
 )
