@@ -104,6 +104,102 @@ function Write-ErrorLog {
 
 }
 
+function Write-ProfMigError {
+
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object]$ErrorObject
+    )
+
+    $category = 'UnexpectedError'
+    $severity = 'Error'
+    $component = 'ProfMig'
+    $message = 'An unspecified ProfMig error occurred.'
+    $reason = $null
+    $recoveryAction = $null
+
+    if (
+        $null -ne $ErrorObject.PSObject.Properties['Category'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.Category)
+    ) {
+        $category = [string]$ErrorObject.Category
+    }
+
+    if (
+        $null -ne $ErrorObject.PSObject.Properties['Severity'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.Severity)
+    ) {
+        $severity = [string]$ErrorObject.Severity
+    }
+
+    if (
+        $null -ne $ErrorObject.PSObject.Properties['Component'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.Component)
+    ) {
+        $component = [string]$ErrorObject.Component
+    }
+
+    if (
+        $null -ne $ErrorObject.PSObject.Properties['Message'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.Message)
+    ) {
+        $message = [string]$ErrorObject.Message
+    }
+    elseif (
+        $null -ne $ErrorObject.PSObject.Properties['Error'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.Error)
+    ) {
+        $message = [string]$ErrorObject.Error
+    }
+
+    if (
+        $null -ne $ErrorObject.PSObject.Properties['Reason'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.Reason)
+    ) {
+        $reason = [string]$ErrorObject.Reason
+    }
+
+    if (
+        $null -ne $ErrorObject.PSObject.Properties['RecoveryAction'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$ErrorObject.RecoveryAction)
+    ) {
+        $recoveryAction = [string]$ErrorObject.RecoveryAction
+    }
+
+    $level = switch ($severity) {
+
+        'Information' { 'INFO' }
+        'Warning'     { 'WARNING' }
+        'Error'       { 'ERROR' }
+        'Critical'    { 'ERROR' }
+
+        default       { 'ERROR' }
+    }
+
+    $details = @(
+        "Category=$category"
+        "Severity=$severity"
+        "Component=$component"
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($reason)) {
+        $details += "Reason=$reason"
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($recoveryAction)) {
+        $details += "Recovery=$recoveryAction"
+    }
+
+    $logMessage = '[{0}] {1}' -f `
+    ($details -join ' | '),
+    $message
+
+    Write-Log `
+        -Level $level `
+        -Message $logMessage
+}
+
 function Get-LogFile {
 
     return $script:LogFile

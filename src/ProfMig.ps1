@@ -338,6 +338,29 @@ catch {
     }
 
     # -------------------------------------------------------------------------
+    # Log standardized ProfMig error when logging is available
+    #
+    # Logging is best-effort here. Startup may have failed before the logging
+    # subsystem was initialized, and a logging failure must never replace the
+    # original application error.
+    # -------------------------------------------------------------------------
+
+    if (
+        $null -ne $profMigError -and
+        (Get-Command Write-ProfMigError -ErrorAction SilentlyContinue)
+    ) {
+        try {
+            Write-ProfMigError `
+                -ErrorObject $profMigError
+        }
+        catch {
+            Write-Host (
+                'Warning: the error could not be written to the ProfMig log.'
+            ) -ForegroundColor Yellow
+        }
+    }
+
+    # -------------------------------------------------------------------------
     # Console fallback
     #
     # Error handling must remain usable even when startup failed before
