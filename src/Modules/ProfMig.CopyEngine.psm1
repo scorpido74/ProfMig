@@ -317,7 +317,7 @@ function New-ProfMigCopyError {
     }
     elseif ($Retryable) {
         $severity = 'Warning'
-        $recoveryAction = 'RetryThenSkip'
+        $recoveryAction = 'Skip'
     }
     else {
         $severity = 'Error'
