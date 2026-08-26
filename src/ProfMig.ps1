@@ -34,6 +34,7 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Core.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Logging.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.CopyEngine.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Verification.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Reporting.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Inventory.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Applications.psm1') -Force
