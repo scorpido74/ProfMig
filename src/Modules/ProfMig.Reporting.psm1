@@ -16,7 +16,7 @@
 .NOTES
     Project : ProfMig
     Module  : ProfMig.Reporting
-    Sprint  : 1.7 - Reporting
+    Sprint  : 3.7 - Migration Verification & Data Integrity
 #>
 
 Set-StrictMode -Version Latest
@@ -241,6 +241,131 @@ function Format-ProfMigReportItem {
 }
 
 # ---------------------------------------------------------------------------
+# Internal function: Format-ProfMigVerificationItem
+# ---------------------------------------------------------------------------
+
+function Format-ProfMigVerificationItem {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [object]$Item
+    )
+
+    $component = if (
+        $Item.PSObject.Properties.Name -contains 'Component' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.Component)
+    ) {
+        [string]$Item.Component
+    }
+    else {
+        'Unknown'
+    }
+
+    $source = if (
+        $Item.PSObject.Properties.Name -contains 'SourceFile' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.SourceFile)
+    ) {
+        [string]$Item.SourceFile
+    }
+    else {
+        'Unknown'
+    }
+
+    $destination = if (
+        $Item.PSObject.Properties.Name -contains 'DestinationFile' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.DestinationFile)
+    ) {
+        [string]$Item.DestinationFile
+    }
+    else {
+        'Unknown'
+    }
+
+    $level = if (
+        $Item.PSObject.Properties.Name -contains 'VerificationLevel' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.VerificationLevel)
+    ) {
+        [string]$Item.VerificationLevel
+    }
+    else {
+        'Unknown'
+    }
+
+    $reason = if (
+        $Item.PSObject.Properties.Name -contains 'Reason' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.Reason)
+    ) {
+        [string]$Item.Reason
+    }
+    else {
+        'Unknown'
+    }
+
+    $sourceSize = if (
+        $Item.PSObject.Properties.Name -contains 'SourceSize' -and
+        $null -ne $Item.SourceSize
+    ) {
+        [string][int64]$Item.SourceSize
+    }
+    else {
+        'Unknown'
+    }
+
+    $destinationSize = if (
+        $Item.PSObject.Properties.Name -contains 'DestinationSize' -and
+        $null -ne $Item.DestinationSize
+    ) {
+        [string][int64]$Item.DestinationSize
+    }
+    else {
+        'Unknown'
+    }
+
+    $sizeMatch = if (
+        $Item.PSObject.Properties.Name -contains 'SizeMatch' -and
+        $null -ne $Item.SizeMatch
+    ) {
+        [string][bool]$Item.SizeMatch
+    }
+    else {
+        'Not checked'
+    }
+
+    $hashAlgorithm = if (
+        $Item.PSObject.Properties.Name -contains 'HashAlgorithm' -and
+        -not [string]::IsNullOrWhiteSpace([string]$Item.HashAlgorithm)
+    ) {
+        [string]$Item.HashAlgorithm
+    }
+    else {
+        'Not used'
+    }
+
+    $hashMatch = if (
+        $Item.PSObject.Properties.Name -contains 'HashMatch' -and
+        $null -ne $Item.HashMatch
+    ) {
+        [string][bool]$Item.HashMatch
+    }
+    else {
+        'Not checked'
+    }
+
+    return @"
+- Component        : $component
+  Source           : $source
+  Destination      : $destination
+  Level            : $level
+  Reason           : $reason
+  Source size      : $sourceSize
+  Destination size : $destinationSize
+  Size match       : $sizeMatch
+  Hash algorithm   : $hashAlgorithm
+  Hash match       : $hashMatch
+"@
+}
+
+# ---------------------------------------------------------------------------
 # Internal function: Get-ProfMigApplicationReportMetrics
 # ---------------------------------------------------------------------------
 
@@ -392,6 +517,94 @@ function ConvertTo-ProfMigMigrationResult {
     $profileFilesExcluded = [int64]$CopyResult.Totals.FilesExcluded
     $profileFilesFailed   = [int64]$CopyResult.Totals.FilesFailed
     $profileBytesCopied   = [int64]$CopyResult.Totals.BytesCopied
+
+
+    $profileFilesVerified = [int64]0
+    $profileBytesVerified = [int64]0
+    $profileVerificationFailures = [int64]0
+
+    if (
+        $CopyResult.Totals.PSObject.Properties.Name -contains
+        'FilesVerified'
+    ) {
+        $profileFilesVerified =
+            [int64]$CopyResult.Totals.FilesVerified
+    }
+
+    if (
+        $CopyResult.Totals.PSObject.Properties.Name -contains
+        'BytesVerified'
+    ) {
+        $profileBytesVerified =
+            [int64]$CopyResult.Totals.BytesVerified
+    }
+
+    if (
+        $CopyResult.Totals.PSObject.Properties.Name -contains
+        'VerificationFailures'
+    ) {
+        $profileVerificationFailures =
+            [int64]$CopyResult.Totals.VerificationFailures
+    }
+
+    $verificationLevel = if (
+        $CopyResult.PSObject.Properties.Name -contains
+        'VerificationLevel' -and
+        -not [string]::IsNullOrWhiteSpace(
+            [string]$CopyResult.VerificationLevel
+        )
+    ) {
+        [string]$CopyResult.VerificationLevel
+    }
+    else {
+        'Unknown'
+    }
+
+    $hashAlgorithm = if (
+        $CopyResult.PSObject.Properties.Name -contains
+        'HashAlgorithm' -and
+        -not [string]::IsNullOrWhiteSpace(
+            [string]$CopyResult.HashAlgorithm
+        )
+    ) {
+        [string]$CopyResult.HashAlgorithm
+    }
+    else {
+        'Not configured'
+    }
+
+    $verificationResults = @()
+
+    foreach ($componentResult in @($CopyResult.Components)) {
+        if (
+            $null -ne $componentResult -and
+            $componentResult.PSObject.Properties.Name -contains
+            'VerificationResults'
+        ) {
+            $verificationResults += @(
+                $componentResult.VerificationResults
+            )
+        }
+    }
+
+    $verificationFailures = @(
+        $verificationResults |
+            Where-Object {
+                $null -ne $_ -and
+                (
+                    (
+                        $_.PSObject.Properties.Name -contains
+                        'Verified' -and
+                        -not [bool]$_.Verified
+                    ) -or
+                    (
+                        $_.PSObject.Properties.Name -contains
+                        'Status' -and
+                        [string]$_.Status -eq 'Failed'
+                    )
+                )
+            }
+    )
 
 
     # -----------------------------------------------------------------------
@@ -562,6 +775,13 @@ function ConvertTo-ProfMigMigrationResult {
         )
     }
 
+    if ($profileVerificationFailures -gt 0) {
+        $errors += (
+            '{0} migration verification failure(s) detected.' -f
+            $profileVerificationFailures
+        )
+    }
+
     foreach ($errorItem in @($CopyResult.Errors)) {
 
         if ($null -eq $errorItem) {
@@ -656,6 +876,7 @@ function ConvertTo-ProfMigMigrationResult {
 
     if (
         $filesFailed -gt 0 -or
+        $profileVerificationFailures -gt 0 -or
         $errors.Count -gt 0 -or
         $CopyResult.Status -eq 'CompletedWithErrors' -or
         (
@@ -737,16 +958,26 @@ function ConvertTo-ProfMigMigrationResult {
         FilesCopied         = [int64]$filesCopied
         FilesSkipped        = [int64]$filesSkipped
         FilesExcluded       = [int64]$filesExcluded
-        FilesFailed         = [int64]$filesFailed
-        BytesCopied         = [int64]$bytesCopied
+        FilesFailed          = [int64]$filesFailed
+        BytesCopied          = [int64]$bytesCopied
+        FilesVerified        = [int64]$profileFilesVerified
+        BytesVerified        = [int64]$profileBytesVerified
+        VerificationFailures = [int64]$profileVerificationFailures
+        VerificationLevel    = $verificationLevel
+        HashAlgorithm        = $hashAlgorithm
+        VerificationResults  = @($verificationResults)
+        VerificationFailureItems = @($verificationFailures)
 
         ProfileTotals       = [PSCustomObject]@{
             FilesSelected = $profileFilesSelected
             FilesCopied   = $profileFilesCopied
             FilesSkipped  = $profileFilesSkipped
             FilesExcluded = $profileFilesExcluded
-            FilesFailed   = $profileFilesFailed
-            BytesCopied   = $profileBytesCopied
+            FilesFailed          = $profileFilesFailed
+            BytesCopied          = $profileBytesCopied
+            FilesVerified        = $profileFilesVerified
+            BytesVerified        = $profileBytesVerified
+            VerificationFailures = $profileVerificationFailures
         }
 
         ApplicationTotals   = [PSCustomObject]@{
@@ -1008,6 +1239,100 @@ function New-ProfMigMigrationReport {
         )
 
 
+        $bytesVerifiedFormatted = (
+            '{0:N0}' -f [int64]$MigrationResult.BytesVerified
+        )
+
+        $verificationFailureDetails = '- None'
+
+        if (
+            $MigrationResult.PSObject.Properties.Name -contains
+            'VerificationFailureItems' -and
+            $MigrationResult.VerificationFailureItems.Count -gt 0
+        ) {
+            $verificationFailureDetails = (
+                $MigrationResult.VerificationFailureItems |
+                    ForEach-Object {
+                        Format-ProfMigVerificationItem -Item $_
+                    }
+            ) -join [Environment]::NewLine
+        }
+
+        $componentVerificationDetails = '- None'
+
+        if (
+            $MigrationResult.PSObject.Properties.Name -contains
+            'ComponentResults' -and
+            $MigrationResult.ComponentResults.Count -gt 0
+        ) {
+            $componentVerificationSections = @()
+
+            foreach (
+                $componentResult in
+                $MigrationResult.ComponentResults
+            ) {
+                $filesVerified = if (
+                    $componentResult.PSObject.Properties.Name -contains
+                    'FilesVerified'
+                ) {
+                    [int64]$componentResult.FilesVerified
+                }
+                else {
+                    [int64]0
+                }
+
+                $bytesVerified = if (
+                    $componentResult.PSObject.Properties.Name -contains
+                    'BytesVerified'
+                ) {
+                    [int64]$componentResult.BytesVerified
+                }
+                else {
+                    [int64]0
+                }
+
+                $componentFailures = if (
+                    $componentResult.PSObject.Properties.Name -contains
+                    'VerificationFailures'
+                ) {
+                    [int64]$componentResult.VerificationFailures
+                }
+                else {
+                    [int64]0
+                }
+
+                $componentVerificationStatus = if (
+                    $componentResult.PSObject.Properties.Name -contains
+                    'VerificationStatus' -and
+                    -not [string]::IsNullOrWhiteSpace(
+                        [string]$componentResult.VerificationStatus
+                    )
+                ) {
+                    [string]$componentResult.VerificationStatus
+                }
+                else {
+                    'Unknown'
+                }
+
+                $componentVerificationSections += @"
+$($componentResult.Component)
+------------------------------------------------------------
+Files verified        : $filesVerified
+Bytes verified        : $('{0:N0}' -f $bytesVerified)
+Verification failures : $componentFailures
+Verification status   : $componentVerificationStatus
+"@
+            }
+
+            $componentVerificationDetails = (
+                $componentVerificationSections -join (
+                    [Environment]::NewLine +
+                    [Environment]::NewLine
+                )
+            )
+        }
+
+
         # -------------------------------------------------------------------
         # Format profile statistics
         # -------------------------------------------------------------------
@@ -1026,8 +1351,11 @@ Files selected : $($MigrationResult.ProfileTotals.FilesSelected)
 Files copied   : $($MigrationResult.ProfileTotals.FilesCopied)
 Files skipped  : $($MigrationResult.ProfileTotals.FilesSkipped)
 Files excluded : $($MigrationResult.ProfileTotals.FilesExcluded)
-Files failed   : $($MigrationResult.ProfileTotals.FilesFailed)
-Bytes copied   : $profileBytesFormatted
+Files failed          : $($MigrationResult.ProfileTotals.FilesFailed)
+Files verified        : $($MigrationResult.ProfileTotals.FilesVerified)
+Verification failures : $($MigrationResult.ProfileTotals.VerificationFailures)
+Bytes copied          : $profileBytesFormatted
+Bytes verified        : $('{0:N0}' -f [int64]$MigrationResult.ProfileTotals.BytesVerified)
 "@
         }
 
@@ -1179,8 +1507,17 @@ Files selected : $($MigrationResult.FilesSelected)
 Files copied   : $($MigrationResult.FilesCopied)
 Files skipped  : $($MigrationResult.FilesSkipped)
 Files excluded : $($MigrationResult.FilesExcluded)
-Files failed   : $($MigrationResult.FilesFailed)
-Bytes copied   : $bytesFormatted
+Files failed          : $($MigrationResult.FilesFailed)
+Files verified        : $($MigrationResult.FilesVerified)
+Verification failures : $($MigrationResult.VerificationFailures)
+Bytes copied          : $bytesFormatted
+Bytes verified        : $bytesVerifiedFormatted
+
+
+Verification configuration
+------------------------------------------------------------
+Verification level : $($MigrationResult.VerificationLevel)
+Hash algorithm     : $($MigrationResult.HashAlgorithm)
 
 
 Profile migration statistics
@@ -1191,6 +1528,18 @@ $profileStatistics
 Application migration statistics
 ------------------------------------------------------------
 $applicationStatistics
+
+
+Verification by component
+============================================================
+
+$componentVerificationDetails
+
+
+Verification failures
+============================================================
+
+$verificationFailureDetails
 
 
 Applications
