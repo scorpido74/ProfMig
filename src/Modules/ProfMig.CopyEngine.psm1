@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Core copy engine for ProfMig.
 
@@ -17,7 +17,7 @@
     Project : ProfMig
     Module  : ProfMig.CopyEngine
     Sprint  : 1.6 - Copy Engine
-    Updated : 3.5 - Permissions and ACL integration
+    Updated : 3.7 - Migration verification and data integrity
 #>
 Set-StrictMode -Version Latest
 
@@ -670,15 +670,16 @@ function Copy-ProfMigSingleFile {
     )
 
     $result = [ordered]@{
-        Selected     = 1
-        Copied       = 0
-        Skipped      = 0
-        Excluded     = 0
-        Failed       = 0
-        BytesCopied  = [int64]0
-        SkippedItem  = $null
-        ExcludedItem = $null
-        Error        = $null
+        Selected           = 1
+        Copied             = 0
+        Skipped            = 0
+        Excluded           = 0
+        Failed             = 0
+        BytesCopied        = [int64]0
+        SkippedItem        = $null
+        ExcludedItem       = $null
+        Error              = $null
+        VerificationResult = $null
     }
 
     if (
@@ -855,6 +856,23 @@ function Copy-ProfMigSingleFile {
             $result.Copied = 1
             $result.BytesCopied = [int64]$File.Length
 
+            try {
+                $result.VerificationResult = Test-ProfMigFileVerification `
+                    -Component $Component `
+                    -SourceFile $File.FullName `
+                    -DestinationFile $DestinationFile `
+                    -VerificationLevel 'Standard'
+            }
+            catch {
+                $result.VerificationResult = New-ProfMigVerificationResult `
+                    -Component $Component `
+                    -SourceFile $File.FullName `
+                    -DestinationFile $DestinationFile `
+                    -VerificationLevel 'Standard' `
+                    -Status 'Failed' `
+                    -Reason 'VerificationReadError'
+            }
+
             break
         }
         catch {
@@ -954,9 +972,10 @@ function Copy-ProfMigComponent {
     $filesFailed   = 0
     $bytesCopied   = [int64]0
 
-    $skippedItems  = @()
-    $excludedItems = @()
-    $errors        = @()
+    $skippedItems        = @()
+    $excludedItems       = @()
+    $errors              = @()
+    $verificationResults = @()
 
     Write-Verbose "Processing component '$Component': $SourcePath"
 
@@ -975,8 +994,13 @@ function Copy-ProfMigComponent {
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
-            BytesCopied     = [int64]0
-            Status          = 'SourceNotFound'
+            BytesCopied          = [int64]0
+            FilesVerified        = 0
+            BytesVerified        = [int64]0
+            VerificationFailures = 0
+            VerificationStatus   = 'NotApplicable'
+            VerificationResults  = @()
+            Status               = 'SourceNotFound'
             SkippedItems    = @()
             ExcludedItems   = @()
             Errors          = @()
@@ -1004,8 +1028,13 @@ function Copy-ProfMigComponent {
             FilesSkipped    = 0
             FilesExcluded   = 0
             FilesFailed     = 0
-            BytesCopied     = [int64]0
-            Status          = 'Failed'
+            BytesCopied          = [int64]0
+            FilesVerified        = 0
+            BytesVerified        = [int64]0
+            VerificationFailures = 0
+            VerificationStatus   = 'NotApplicable'
+            VerificationResults  = @()
+            Status               = 'Failed'
             SkippedItems    = @()
             ExcludedItems   = @()
             Errors          = @(
@@ -1059,6 +1088,10 @@ function Copy-ProfMigComponent {
             $filesExcluded += $fileResult.Excluded
             $filesFailed   += $fileResult.Failed
             $bytesCopied   += $fileResult.BytesCopied
+
+            if ($null -ne $fileResult.VerificationResult) {
+            $verificationResults += $fileResult.VerificationResult
+        }
 
             if ($null -ne $fileResult.SkippedItem) {
                 $skippedItems += $fileResult.SkippedItem
@@ -1292,6 +1325,10 @@ function Copy-ProfMigComponent {
                 $filesFailed   += $fileResult.Failed
                 $bytesCopied   += $fileResult.BytesCopied
 
+                if ($null -ne $fileResult.VerificationResult) {
+                    $verificationResults += $fileResult.VerificationResult
+                }
+
                 if ($null -ne $fileResult.SkippedItem) {
                     $skippedItems += $fileResult.SkippedItem
                 }
@@ -1307,7 +1344,26 @@ function Copy-ProfMigComponent {
         }
     }
 
-    if ($filesFailed -gt 0) {
+    $verificationSummary = $null
+
+    if ($filesCopied -gt 0) {
+        $verificationSummary = Get-ProfMigVerificationSummary `
+            -VerificationResults @($verificationResults) `
+            -FilesSelected $filesCopied `
+            -FilesCopied $filesCopied `
+            -FilesSkipped 0 `
+            -FilesFailed 0 `
+            -BytesSelected $bytesCopied `
+            -BytesCopied $bytesCopied
+    }
+
+    if (
+        $null -ne $verificationSummary -and
+        -not $verificationSummary.Verified
+    ) {
+        $status = 'CompletedWithErrors'
+    }
+    elseif ($filesFailed -gt 0) {
         $status = 'CompletedWithErrors'
     }
     elseif ($filesSkipped -gt 0) {
@@ -1330,10 +1386,35 @@ function Copy-ProfMigComponent {
         FilesCopied     = $filesCopied
         FilesSkipped    = $filesSkipped
         FilesExcluded   = $filesExcluded
-        FilesFailed     = $filesFailed
-        BytesCopied     = $bytesCopied
-        Status          = $status
-        SkippedItems    = @($skippedItems)
+        FilesFailed          = $filesFailed
+        BytesCopied          = $bytesCopied
+        FilesVerified        = if ($null -ne $verificationSummary) {
+            $verificationSummary.FilesVerified
+        }
+        else {
+            0
+        }
+        BytesVerified        = if ($null -ne $verificationSummary) {
+            $verificationSummary.BytesVerified
+        }
+        else {
+            [int64]0
+        }
+        VerificationFailures = if ($null -ne $verificationSummary) {
+            $verificationSummary.VerificationFailures
+        }
+        else {
+            0
+        }
+        VerificationStatus   = if ($null -ne $verificationSummary) {
+            $verificationSummary.Status
+        }
+        else {
+            'NotApplicable'
+        }
+        VerificationResults  = @($verificationResults)
+        Status               = $status
+        SkippedItems         = @($skippedItems)
         ExcludedItems   = @($excludedItems)
         Errors          = @($errors)
     }
