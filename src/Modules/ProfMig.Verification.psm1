@@ -116,7 +116,139 @@ function New-ProfMigVerificationResult {
     }
 }
 
+function Test-ProfMigFileVerification {
+    <#
+    .SYNOPSIS
+        Verifies a migrated file against its source file.
 
+    .DESCRIPTION
+        Performs read-only verification of a source and destination file.
+
+        Basic and Standard verification validate that the destination exists
+        and that its file size matches the source.
+
+        Hash verification is handled separately and is not performed by this
+        function yet.
+    #>
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [string]$Component,
+
+        [Parameter(Mandatory)]
+        [string]$SourceFile,
+
+        [Parameter(Mandatory)]
+        [string]$DestinationFile,
+
+        [Parameter()]
+        [ValidateSet('Basic', 'Standard', 'Hash')]
+        [string]$VerificationLevel = 'Standard'
+    )
+
+    $sourceExists = Test-Path -LiteralPath $SourceFile -PathType Leaf
+
+    if (-not $sourceExists) {
+        return New-ProfMigVerificationResult `
+            -Component $Component `
+            -SourceFile $SourceFile `
+            -DestinationFile $DestinationFile `
+            -VerificationLevel $VerificationLevel `
+            -SourceExists $false `
+            -DestinationExists (
+                Test-Path -LiteralPath $DestinationFile -PathType Leaf
+            ) `
+            -Status 'Failed' `
+            -Reason 'VerificationReadError'
+    }
+
+    try {
+        $sourceItem = Get-Item `
+            -LiteralPath $SourceFile `
+            -Force `
+            -ErrorAction Stop
+    }
+    catch {
+        return New-ProfMigVerificationResult `
+            -Component $Component `
+            -SourceFile $SourceFile `
+            -DestinationFile $DestinationFile `
+            -VerificationLevel $VerificationLevel `
+            -SourceExists $true `
+            -DestinationExists (
+                Test-Path -LiteralPath $DestinationFile -PathType Leaf
+            ) `
+            -Status 'Failed' `
+            -Reason 'VerificationReadError'
+    }
+
+    $destinationExists = Test-Path `
+        -LiteralPath $DestinationFile `
+        -PathType Leaf
+
+    if (-not $destinationExists) {
+        return New-ProfMigVerificationResult `
+            -Component $Component `
+            -SourceFile $SourceFile `
+            -DestinationFile $DestinationFile `
+            -VerificationLevel $VerificationLevel `
+            -SourceExists $true `
+            -DestinationExists $false `
+            -SourceSize $sourceItem.Length `
+            -Status 'Failed' `
+            -Reason 'DestinationMissing'
+    }
+
+    try {
+        $destinationItem = Get-Item `
+            -LiteralPath $DestinationFile `
+            -Force `
+            -ErrorAction Stop
+    }
+    catch {
+        return New-ProfMigVerificationResult `
+            -Component $Component `
+            -SourceFile $SourceFile `
+            -DestinationFile $DestinationFile `
+            -VerificationLevel $VerificationLevel `
+            -SourceExists $true `
+            -DestinationExists $true `
+            -SourceSize $sourceItem.Length `
+            -Status 'Failed' `
+            -Reason 'VerificationReadError'
+    }
+
+    $sizeMatch = $sourceItem.Length -eq $destinationItem.Length
+
+    if (-not $sizeMatch) {
+        return New-ProfMigVerificationResult `
+            -Component $Component `
+            -SourceFile $SourceFile `
+            -DestinationFile $DestinationFile `
+            -VerificationLevel $VerificationLevel `
+            -SourceExists $true `
+            -DestinationExists $true `
+            -SourceSize $sourceItem.Length `
+            -DestinationSize $destinationItem.Length `
+            -SizeMatch $false `
+            -Status 'Failed' `
+            -Reason 'SizeMismatch'
+    }
+
+    return New-ProfMigVerificationResult `
+        -Component $Component `
+        -SourceFile $SourceFile `
+        -DestinationFile $DestinationFile `
+        -VerificationLevel $VerificationLevel `
+        -SourceExists $true `
+        -DestinationExists $true `
+        -SourceSize $sourceItem.Length `
+        -DestinationSize $destinationItem.Length `
+        -SizeMatch $true `
+        -Status 'Success' `
+        -Reason 'Verified'
+}
 function New-ProfMigVerificationSummary {
     <#
     .SYNOPSIS
@@ -165,5 +297,6 @@ function New-ProfMigVerificationSummary {
 Export-ModuleMember -Function @(
     'Test-ProfMigVerificationLevel'
     'New-ProfMigVerificationResult'
+    'Test-ProfMigFileVerification'
     'New-ProfMigVerificationSummary'
 )
