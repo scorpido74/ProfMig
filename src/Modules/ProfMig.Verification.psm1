@@ -144,7 +144,16 @@ function Test-ProfMigFileVerification {
 
         [Parameter()]
         [ValidateSet('Basic', 'Standard', 'Hash')]
-        [string]$VerificationLevel = 'Standard'
+        [string]$VerificationLevel = 'Standard',
+
+        [Parameter()]
+        [ValidateSet(
+            'SHA1',
+            'SHA256',
+            'SHA384',
+            'SHA512'
+        )]
+        [string]$HashAlgorithm = 'SHA256'
     )
 
     $sourceExists = Test-Path -LiteralPath $SourceFile -PathType Leaf
@@ -236,6 +245,78 @@ function Test-ProfMigFileVerification {
             -Reason 'SizeMismatch'
     }
 
+    if ($VerificationLevel -eq 'Hash') {
+
+        try {
+            $sourceHash = (
+                Get-FileHash `
+                    -LiteralPath $SourceFile `
+                    -Algorithm $HashAlgorithm `
+                    -ErrorAction Stop
+            ).Hash
+
+            $destinationHash = (
+                Get-FileHash `
+                    -LiteralPath $DestinationFile `
+                    -Algorithm $HashAlgorithm `
+                    -ErrorAction Stop
+            ).Hash
+        }
+        catch {
+            return New-ProfMigVerificationResult `
+                -Component $Component `
+                -SourceFile $SourceFile `
+                -DestinationFile $DestinationFile `
+                -VerificationLevel $VerificationLevel `
+                -SourceExists $true `
+                -DestinationExists $true `
+                -SourceSize $sourceItem.Length `
+                -DestinationSize $destinationItem.Length `
+                -SizeMatch $true `
+                -HashAlgorithm $HashAlgorithm `
+                -Status 'Failed' `
+                -Reason 'VerificationReadError'
+        }
+
+        $hashMatch = $sourceHash -eq $destinationHash
+
+        if (-not $hashMatch) {
+            return New-ProfMigVerificationResult `
+                -Component $Component `
+                -SourceFile $SourceFile `
+                -DestinationFile $DestinationFile `
+                -VerificationLevel $VerificationLevel `
+                -SourceExists $true `
+                -DestinationExists $true `
+                -SourceSize $sourceItem.Length `
+                -DestinationSize $destinationItem.Length `
+                -SizeMatch $true `
+                -HashAlgorithm $HashAlgorithm `
+                -SourceHash $sourceHash `
+                -DestinationHash $destinationHash `
+                -HashMatch $false `
+                -Status 'Failed' `
+                -Reason 'HashMismatch'
+        }
+
+        return New-ProfMigVerificationResult `
+            -Component $Component `
+            -SourceFile $SourceFile `
+            -DestinationFile $DestinationFile `
+            -VerificationLevel $VerificationLevel `
+            -SourceExists $true `
+            -DestinationExists $true `
+            -SourceSize $sourceItem.Length `
+            -DestinationSize $destinationItem.Length `
+            -SizeMatch $true `
+            -HashAlgorithm $HashAlgorithm `
+            -SourceHash $sourceHash `
+            -DestinationHash $destinationHash `
+            -HashMatch $true `
+            -Status 'Success' `
+            -Reason 'Verified'
+    }
+
     return New-ProfMigVerificationResult `
         -Component $Component `
         -SourceFile $SourceFile `
@@ -249,6 +330,7 @@ function Test-ProfMigFileVerification {
         -Status 'Success' `
         -Reason 'Verified'
 }
+
 function New-ProfMigVerificationSummary {
     <#
     .SYNOPSIS
