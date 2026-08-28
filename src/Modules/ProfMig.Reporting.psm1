@@ -548,6 +548,15 @@ function ConvertTo-ProfMigMigrationResult {
     }
 
     $verificationLevel = if (
+    $CopyResult.Totals.PSObject.Properties.Name -contains
+    'VerificationLevel' -and
+    -not [string]::IsNullOrWhiteSpace(
+        [string]$CopyResult.Totals.VerificationLevel
+    )
+    ) {
+        [string]$CopyResult.Totals.VerificationLevel
+    }
+    elseif (
         $CopyResult.PSObject.Properties.Name -contains
         'VerificationLevel' -and
         -not [string]::IsNullOrWhiteSpace(
@@ -561,6 +570,15 @@ function ConvertTo-ProfMigMigrationResult {
     }
 
     $hashAlgorithm = if (
+        $CopyResult.Totals.PSObject.Properties.Name -contains
+        'HashAlgorithm' -and
+        -not [string]::IsNullOrWhiteSpace(
+            [string]$CopyResult.Totals.HashAlgorithm
+        )
+    ) {
+        [string]$CopyResult.Totals.HashAlgorithm
+    }
+    elseif (
         $CopyResult.PSObject.Properties.Name -contains
         'HashAlgorithm' -and
         -not [string]::IsNullOrWhiteSpace(
@@ -1596,18 +1614,27 @@ Application Migration status
 $applicationMigrationStatus
 "@
 
+# -------------------------------------------------------------------
+# Protect sensitive information before persisting the report
+# -------------------------------------------------------------------
 
-        # -------------------------------------------------------------------
-        # Write report
-        # -------------------------------------------------------------------
+    if (Get-Command Protect-ProfMigSensitiveText -ErrorAction SilentlyContinue) {
 
-        $report |
-            Set-Content `
-                -LiteralPath $reportFile `
-                -Encoding UTF8 `
-                -ErrorAction Stop
+        $report = Protect-ProfMigSensitiveText `
+            -Message $report
+    }
 
-        return $reportFile
+# -------------------------------------------------------------------
+# Write report
+# -------------------------------------------------------------------
+
+$report |
+    Set-Content `
+        -LiteralPath $reportFile `
+        -Encoding UTF8 `
+        -ErrorAction Stop
+
+return $reportFile
     }
     catch {
 
