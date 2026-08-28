@@ -548,6 +548,15 @@ function ConvertTo-ProfMigMigrationResult {
     }
 
     $verificationLevel = if (
+    $CopyResult.Totals.PSObject.Properties.Name -contains
+    'VerificationLevel' -and
+    -not [string]::IsNullOrWhiteSpace(
+        [string]$CopyResult.Totals.VerificationLevel
+    )
+    ) {
+        [string]$CopyResult.Totals.VerificationLevel
+    }
+    elseif (
         $CopyResult.PSObject.Properties.Name -contains
         'VerificationLevel' -and
         -not [string]::IsNullOrWhiteSpace(
@@ -561,6 +570,15 @@ function ConvertTo-ProfMigMigrationResult {
     }
 
     $hashAlgorithm = if (
+        $CopyResult.Totals.PSObject.Properties.Name -contains
+        'HashAlgorithm' -and
+        -not [string]::IsNullOrWhiteSpace(
+            [string]$CopyResult.Totals.HashAlgorithm
+        )
+    ) {
+        [string]$CopyResult.Totals.HashAlgorithm
+    }
+    elseif (
         $CopyResult.PSObject.Properties.Name -contains
         'HashAlgorithm' -and
         -not [string]::IsNullOrWhiteSpace(
