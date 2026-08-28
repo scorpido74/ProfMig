@@ -108,6 +108,8 @@ function Write-Log {
 
         "ERROR"   { $Color = "Red" }
 
+        "CRITICAL" { $Color = "Red" }
+
         default   { $Color = "Gray" }
 
     }
@@ -224,7 +226,7 @@ function Write-ProfMigError {
         'Information' { 'INFO' }
         'Warning'     { 'WARNING' }
         'Error'       { 'ERROR' }
-        'Critical'    { 'ERROR' }
+        'Critical'    { 'CRITICAL' }
 
         default       { 'ERROR' }
     }
