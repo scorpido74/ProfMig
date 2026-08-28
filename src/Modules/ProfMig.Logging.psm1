@@ -31,6 +31,56 @@ function Initialize-Logging {
     return $script:LogFile
 }
 
+function Protect-ProfMigSensitiveText {
+
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$Message
+    )
+
+    if ([string]::IsNullOrEmpty($Message)) {
+        return $Message
+    }
+
+    $sanitized = $Message
+
+    # Redact common credential and secret assignments.
+    #
+    # Examples:
+    #   Password=secret
+    #   password: secret
+    #   Token="secret"
+    #   ApiKey = abc123
+    #   ClientSecret: xyz
+    #
+    # The key name is retained for diagnostic value while the value is removed.
+    $credentialPattern = '(?i)\b(password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|secret|client[_-]?secret|authorization)\b(\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|[^\s;,]+)'
+
+    $sanitized = [regex]::Replace(
+        $sanitized,
+        $credentialPattern,
+        {
+            param($match)
+
+            return (
+                '{0}{1}[REDACTED]' -f
+                    $match.Groups[1].Value,
+                    $match.Groups[2].Value
+            )
+        }
+    )
+
+    # Redact HTTP Bearer credentials.
+    $sanitized = [regex]::Replace(
+        $sanitized,
+        '(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*',
+        'Bearer [REDACTED]'
+    )
+
+    return $sanitized
+}
 function Write-Log {
 
     [CmdletBinding()]
@@ -44,7 +94,9 @@ function Write-Log {
 
     $Time = Get-Date -Format "HH:mm:ss"
 
-    $Line = "[$Time] [$Level] $Message"
+    $SafeMessage = Protect-ProfMigSensitiveText -Message $Message
+
+    $Line = "[$Time] [$Level] $SafeMessage"
 
     switch ($Level) {
 

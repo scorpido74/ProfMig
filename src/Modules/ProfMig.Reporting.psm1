@@ -1614,18 +1614,27 @@ Application Migration status
 $applicationMigrationStatus
 "@
 
+# -------------------------------------------------------------------
+# Protect sensitive information before persisting the report
+# -------------------------------------------------------------------
 
-        # -------------------------------------------------------------------
-        # Write report
-        # -------------------------------------------------------------------
+    if (Get-Command Protect-ProfMigSensitiveText -ErrorAction SilentlyContinue) {
 
-        $report |
-            Set-Content `
-                -LiteralPath $reportFile `
-                -Encoding UTF8 `
-                -ErrorAction Stop
+        $report = Protect-ProfMigSensitiveText `
+            -Message $report
+    }
 
-        return $reportFile
+# -------------------------------------------------------------------
+# Write report
+# -------------------------------------------------------------------
+
+$report |
+    Set-Content `
+        -LiteralPath $reportFile `
+        -Encoding UTF8 `
+        -ErrorAction Stop
+
+return $reportFile
     }
     catch {
 
