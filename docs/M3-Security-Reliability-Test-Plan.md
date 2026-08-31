@@ -1272,3 +1272,90 @@ Issues discovered during validation were remediated and retested successfully. N
 Based on the executed test scenarios and documented results, Milestone 3 – Reliability & Security meets its defined acceptance criteria.
 
 **M3 status: APPROVED**
+
+
+---
+
+# 20. Post-validation regression suite
+
+Following formal Milestone 3 approval, the validated M3 behaviour was converted into a reusable Pester regression suite.
+
+The purpose of this suite is to preserve the security, reliability and migration-safety behaviour established during Milestone 3 and to detect regressions during future ProfMig development.
+
+The automated regression suite is located in:
+
+`tests\M3\Automated`
+
+It can be executed using:
+
+```powershell
+& '.\tests\M3\Invoke-M3Tests.ps1'
+```
+
+The regression runner is compatible with the Windows PowerShell 5.1 / Pester 3.4 environment currently used by ProfMig.
+
+## Regression coverage
+
+The automated regression suite contains 47 tests covering:
+
+| Area | Automated tests |
+| --- | ---: |
+| Profile validation | 5 |
+| Privilege validation | 3 |
+| Storage capacity validation | 4 |
+| File access and handling | 7 |
+| Permissions / ACL | 5 |
+| Recovery and error handling | 5 |
+| Migration verification | 5 |
+| Security validation | 4 |
+| Logging | 5 |
+| Reporting | 4 |
+| **Total** | **47** |
+
+The latest complete regression run completed successfully:
+
+* Tests executed: 47
+* Tests passed: 47
+* Tests failed: 0
+* Tests skipped: 0
+* Tests pending: 0
+* Tests inconclusive: 0
+* Runner exit code: 0
+* Overall result: PASS
+
+These 47 automated tests are a regression suite derived from Milestone 3 behaviour. They do not replace or redefine the 51 formal validation scenarios recorded in this document.
+
+## Manual and hybrid regression checks
+
+Two scenarios intentionally retain a manual or hybrid component:
+
+* `M3-PRIV-02` – genuine execution from a non-elevated Windows process.
+* `M3-SEC-01` – verification that ProfMig does not weaken machine-wide Windows security controls.
+
+The reusable procedures for these checks are documented in:
+
+`tests\M3\Manual\M3-Manual-Tests.md`
+
+Other behaviour from the original validation scenarios is represented by automated tests where a deterministic and controlled regression test is appropriate.
+
+## Findings discovered while building the regression suite
+
+Building and repeatedly executing the regression suite exposed additional issues that were not open defects at the time of formal M3 approval.
+
+These findings were corrected and the complete automated regression suite was rerun successfully.
+
+| Area | Finding | Resolution | Commit | Final status |
+| --- | --- | --- | --- | --- |
+| File handling | Component copy path calculation could mix Windows short and long path representations, resulting in an incorrect relative destination path | Component copy path calculation was normalized against the actual source item path | `d48f1ed` | Resolved and regression tested |
+| Logging / security | Bearer-token redaction could be partially consumed by the generic credential-assignment redaction pattern | Sensitive-data redaction order was strengthened so Bearer tokens are protected before generic credential assignments | `f1a46a4` | Resolved and regression tested |
+| Test infrastructure | Logging regression state could remain active after its temporary log directory was removed, causing later test suites to attempt logging to a stale path | Logging module state is unloaded during regression-test cleanup | `5e3eaa4` | Resolved; test isolation corrected |
+
+The final complete automated regression run passed all 47 tests without unexpected logging errors.
+
+## Regression conclusion
+
+Milestone 3 remains formally approved based on the original 51 executed validation scenarios.
+
+The post-validation regression suite adds a repeatable safety net for future development and confirms that the M3 validation, security, permissions, recovery, verification, logging and reporting behaviours remain operational after the additional regression-related fixes.
+
+**M3 regression status: PASS**
