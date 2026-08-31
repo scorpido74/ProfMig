@@ -28,3 +28,6 @@ TestResults/
 
 # Local ProfMig test data
 TestData/
+
+# Generated runtime packages
+dist/
