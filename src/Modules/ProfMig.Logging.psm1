@@ -10,6 +10,11 @@ Set-StrictMode -Version Latest
 
 $script:LogFile = $null
 
+
+# ---------------------------------------------------------------------------
+# Initialize logging
+# ---------------------------------------------------------------------------
+
 function Initialize-Logging {
 
     [CmdletBinding()]
@@ -18,18 +23,33 @@ function Initialize-Logging {
         [string]$LogFolder
     )
 
-    if (-not (Test-Path $LogFolder)) {
-        New-Item -ItemType Directory -Path $LogFolder -Force | Out-Null
+    if (-not (Test-Path -LiteralPath $LogFolder)) {
+        New-Item `
+            -ItemType Directory `
+            -Path $LogFolder `
+            -Force |
+            Out-Null
     }
 
-    $TimeStamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $TimeStamp = Get-Date -Format 'yyyyMMdd_HHmmss'
 
-    $script:LogFile = Join-Path $LogFolder "ProfMig_$TimeStamp.log"
+    $script:LogFile = Join-Path `
+        -Path $LogFolder `
+        -ChildPath "ProfMig_$TimeStamp.log"
 
-    New-Item -ItemType File -Path $script:LogFile -Force | Out-Null
+    New-Item `
+        -ItemType File `
+        -Path $script:LogFile `
+        -Force |
+        Out-Null
 
     return $script:LogFile
 }
+
+
+# ---------------------------------------------------------------------------
+# Protect sensitive information
+# ---------------------------------------------------------------------------
 
 function Protect-ProfMigSensitiveText {
 
@@ -46,6 +66,21 @@ function Protect-ProfMigSensitiveText {
 
     $sanitized = $Message
 
+    # Redact HTTP Bearer credentials before processing generic credential
+    # assignments. This prevents "Bearer" from being consumed as the value of
+    # an Authorization assignment while leaving the actual token exposed.
+    #
+    # Example:
+    #   Authorization=Bearer eyJhbGciOi...
+    #
+    # becomes:
+    #   Authorization=Bearer [REDACTED]
+    $sanitized = [regex]::Replace(
+        $sanitized,
+        '(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*',
+        'Bearer [REDACTED]'
+    )
+
     # Redact common credential and secret assignments.
     #
     # Examples:
@@ -54,6 +89,7 @@ function Protect-ProfMigSensitiveText {
     #   Token="secret"
     #   ApiKey = abc123
     #   ClientSecret: xyz
+    #   Authorization=Bearer [REDACTED]
     #
     # The key name is retained for diagnostic value while the value is removed.
     $credentialPattern = '(?i)\b(password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|api[_-]?key|apikey|secret|client[_-]?secret|authorization)\b(\s*[:=]\s*)(?:"[^"]*"|''[^'']*''|[^\s;,]+)'
@@ -72,15 +108,14 @@ function Protect-ProfMigSensitiveText {
         }
     )
 
-    # Redact HTTP Bearer credentials.
-    $sanitized = [regex]::Replace(
-        $sanitized,
-        '(?i)\bBearer\s+[A-Za-z0-9\-._~+/]+=*',
-        'Bearer [REDACTED]'
-    )
-
     return $sanitized
 }
+
+
+# ---------------------------------------------------------------------------
+# Write log entry
+# ---------------------------------------------------------------------------
+
 function Write-Log {
 
     [CmdletBinding()]
@@ -92,71 +127,108 @@ function Write-Log {
         [string]$Message
     )
 
-    $Time = Get-Date -Format "HH:mm:ss"
+    $Time = Get-Date -Format 'HH:mm:ss'
 
-    $SafeMessage = Protect-ProfMigSensitiveText -Message $Message
+    $SafeMessage = Protect-ProfMigSensitiveText `
+        -Message $Message
 
     $Line = "[$Time] [$Level] $SafeMessage"
 
     switch ($Level) {
 
-        "INFO"    { $Color = "White" }
+        'INFO' {
+            $Color = 'White'
+        }
 
-        "SUCCESS" { $Color = "Green" }
+        'SUCCESS' {
+            $Color = 'Green'
+        }
 
-        "WARNING" { $Color = "Yellow" }
+        'WARNING' {
+            $Color = 'Yellow'
+        }
 
-        "ERROR"   { $Color = "Red" }
+        'ERROR' {
+            $Color = 'Red'
+        }
 
-        "CRITICAL" { $Color = "Red" }
+        'CRITICAL' {
+            $Color = 'Red'
+        }
 
-        default   { $Color = "Gray" }
-
+        default {
+            $Color = 'Gray'
+        }
     }
 
-    Write-Host $Line -ForegroundColor $Color
+    Write-Host `
+        $Line `
+        -ForegroundColor $Color
 
     if ($script:LogFile) {
 
         Add-Content `
             -Path $script:LogFile `
             -Value $Line
-
     }
-
 }
+
+
+# ---------------------------------------------------------------------------
+# Convenience logging functions
+# ---------------------------------------------------------------------------
 
 function Write-Info {
 
-    param([string]$Message)
+    param(
+        [string]$Message
+    )
 
-    Write-Log -Level "INFO" -Message $Message
-
+    Write-Log `
+        -Level 'INFO' `
+        -Message $Message
 }
+
 
 function Write-Success {
 
-    param([string]$Message)
+    param(
+        [string]$Message
+    )
 
-    Write-Log -Level "SUCCESS" -Message $Message
-
+    Write-Log `
+        -Level 'SUCCESS' `
+        -Message $Message
 }
+
 
 function Write-WarningLog {
 
-    param([string]$Message)
+    param(
+        [string]$Message
+    )
 
-    Write-Log -Level "WARNING" -Message $Message
-
+    Write-Log `
+        -Level 'WARNING' `
+        -Message $Message
 }
+
 
 function Write-ErrorLog {
 
-    param([string]$Message)
+    param(
+        [string]$Message
+    )
 
-    Write-Log -Level "ERROR" -Message $Message
-
+    Write-Log `
+        -Level 'ERROR' `
+        -Message $Message
 }
+
+
+# ---------------------------------------------------------------------------
+# Structured ProfMig error logging
+# ---------------------------------------------------------------------------
 
 function Write-ProfMigError {
 
@@ -223,12 +295,25 @@ function Write-ProfMigError {
 
     $level = switch ($severity) {
 
-        'Information' { 'INFO' }
-        'Warning'     { 'WARNING' }
-        'Error'       { 'ERROR' }
-        'Critical'    { 'CRITICAL' }
+        'Information' {
+            'INFO'
+        }
 
-        default       { 'ERROR' }
+        'Warning' {
+            'WARNING'
+        }
+
+        'Error' {
+            'ERROR'
+        }
+
+        'Critical' {
+            'CRITICAL'
+        }
+
+        default {
+            'ERROR'
+        }
     }
 
     $details = @(
@@ -246,18 +331,27 @@ function Write-ProfMigError {
     }
 
     $logMessage = '[{0}] {1}' -f `
-    ($details -join ' | '),
-    $message
+        ($details -join ' | '),
+        $message
 
     Write-Log `
         -Level $level `
         -Message $logMessage
 }
 
+
+# ---------------------------------------------------------------------------
+# Get active log file
+# ---------------------------------------------------------------------------
+
 function Get-LogFile {
 
     return $script:LogFile
-
 }
+
+
+# ---------------------------------------------------------------------------
+# Module exports
+# ---------------------------------------------------------------------------
 
 Export-ModuleMember -Function *

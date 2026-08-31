@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Core copy engine for ProfMig.
 
@@ -1242,7 +1242,7 @@ function Copy-ProfMigComponent {
             foreach ($child in $children) {
                 if ($child.PSIsContainer) {
                     $relativeDirectory = Get-ProfMigRelativePath `
-                        -BasePath $SourcePath `
+                        -BasePath $sourceItem.FullName `
                         -FullPath $child.FullName
 
                     $centralDirectoryExclusion = Test-ProfMigExclusion `
@@ -1310,7 +1310,7 @@ function Copy-ProfMigComponent {
                 }
 
                 $relativePath = Get-ProfMigRelativePath `
-                    -BasePath $SourcePath `
+                    -BasePath $sourceItem.FullName `
                     -FullPath $child.FullName
 
                 $destinationFile = Join-Path `
