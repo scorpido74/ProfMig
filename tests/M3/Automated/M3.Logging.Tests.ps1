@@ -244,6 +244,12 @@ Describe 'M3 - Logging' {
                 Should Match 'Structured logging regression test'
         }
         finally {
+            # Prevent logging state from leaking into later M3 test suites.
+            # The Logging module keeps the active log file in module scope.
+            Remove-Module ProfMig.Logging `
+                -Force `
+                -ErrorAction SilentlyContinue
+
             Remove-ProfMigTestRoot `
                 -Path $TestRoot
         }
