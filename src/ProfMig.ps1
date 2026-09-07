@@ -4,10 +4,70 @@
 
 .DESCRIPTION
     Initializes the ProfMig configuration, core framework, logging,
-    inventory engine and interactive menu.
+    inventory engine and migration workflow.
 
-    This script acts as the central entry point for ProfMig.
+    ProfMig supports both interactive and unattended command-line execution.
+
+.EXAMPLE
+    .\ProfMig.ps1
+
+    Starts ProfMig in interactive mode.
+
+.EXAMPLE
+    .\ProfMig.ps1 `
+        -Silent `
+        -SourceSid 'S-1-12-1-...' `
+        -DestinationSid 'S-1-12-1-...'
+
+    Starts an unattended migration using Windows profile SIDs.
+
+.EXAMPLE
+    .\ProfMig.ps1 `
+        -Silent `
+        -SourceProfilePath 'C:\Users\OldUser' `
+        -DestinationProfilePath 'C:\Users\NewUser'
+
+    Starts an unattended migration using Windows profile paths.
+
+.EXAMPLE
+    .\ProfMig.ps1 `
+        -Silent `
+        -SourceSid 'S-1-12-1-...' `
+        -DestinationSid 'S-1-12-1-...' `
+        -SkipApplications
+
+    Starts an unattended migration without application migration.
 #>
+
+[CmdletBinding()]
+param (
+    [Parameter()]
+    [switch]$Silent,
+
+    [Parameter()]
+    [string]$SourceSid,
+
+    [Parameter()]
+    [string]$DestinationSid,
+
+    [Parameter()]
+    [string]$SourceProfilePath,
+
+    [Parameter()]
+    [string]$DestinationProfilePath,
+
+    [Parameter()]
+    [switch]$SkipApplications,
+
+    [Parameter()]
+    [string]$ConfigPath,
+
+    [Parameter()]
+    [string]$LogPath,
+
+    [Parameter()]
+    [string]$ReportPath
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -20,7 +80,13 @@ $ErrorActionPreference = 'Stop'
 $SourceRoot  = Split-Path -Parent $PSCommandPath
 $ProjectRoot = Split-Path -Parent $SourceRoot
 $ModuleRoot  = Join-Path $SourceRoot 'Modules'
-$ConfigPath  = Join-Path $SourceRoot 'Config.psd1'
+
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path $SourceRoot 'Config.psd1'
+}
+else {
+    $ConfigPath = [System.IO.Path]::GetFullPath($ConfigPath)
+}
 
 
 try {
@@ -44,7 +110,97 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Chrome.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Outlook.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Validation.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Migration.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Menu.psm1') -Force
+
+
+    # -------------------------------------------------------------------------
+    # Validate command-line mode
+    # -------------------------------------------------------------------------
+
+    if ($Silent) {
+
+        $usingSid = (
+            -not [string]::IsNullOrWhiteSpace($SourceSid) -or
+            -not [string]::IsNullOrWhiteSpace($DestinationSid)
+        )
+
+        $usingPath = (
+            -not [string]::IsNullOrWhiteSpace($SourceProfilePath) -or
+            -not [string]::IsNullOrWhiteSpace($DestinationProfilePath)
+        )
+
+        if ($usingSid -and $usingPath) {
+
+            throw (
+                New-ProfMigException `
+                    -Message (
+                        'Silent mode cannot combine SID and profile-path ' +
+                        'identifiers.'
+                    ) `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'MixedProfileIdentifiers'
+            )
+        }
+
+        if ($usingSid) {
+
+            if (
+                [string]::IsNullOrWhiteSpace($SourceSid) -or
+                [string]::IsNullOrWhiteSpace($DestinationSid)
+            ) {
+
+                throw (
+                    New-ProfMigException `
+                        -Message (
+                            'Silent SID mode requires both SourceSid and ' +
+                            'DestinationSid.'
+                        ) `
+                        -Category 'ConfigurationError' `
+                        -Severity 'Critical' `
+                        -RecoveryAction 'Stop' `
+                        -Reason 'IncompleteSidParameters'
+                )
+            }
+        }
+        elseif ($usingPath) {
+
+            if (
+                [string]::IsNullOrWhiteSpace($SourceProfilePath) -or
+                [string]::IsNullOrWhiteSpace($DestinationProfilePath)
+            ) {
+
+                throw (
+                    New-ProfMigException `
+                        -Message (
+                            'Silent profile-path mode requires both ' +
+                            'SourceProfilePath and DestinationProfilePath.'
+                        ) `
+                        -Category 'ConfigurationError' `
+                        -Severity 'Critical' `
+                        -RecoveryAction 'Stop' `
+                        -Reason 'IncompleteProfilePathParameters'
+                )
+            }
+        }
+        else {
+
+            throw (
+                New-ProfMigException `
+                    -Message (
+                        'Silent mode requires source and destination ' +
+                        'identifiers.'
+                    ) `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'MissingProfileIdentifiers'
+            )
+        }
+    }
+
 
     # -------------------------------------------------------------------------
     # Load configuration
@@ -64,7 +220,8 @@ try {
         )
     }
 
-        # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
     # Resolve application definition folder
     # -------------------------------------------------------------------------
 
@@ -89,6 +246,7 @@ try {
                 -PathType Container
         )
     ) {
+
         throw (
             New-ProfMigException `
                 -Message (
@@ -109,6 +267,7 @@ try {
 
     $null = Initialize-ProfMig `
         -Configuration $Config
+
 
     # -------------------------------------------------------------------------
     # Load generic application definitions
@@ -148,11 +307,16 @@ try {
         )
     }
 
+
     # -------------------------------------------------------------------------
     # Resolve report folder
     # -------------------------------------------------------------------------
 
-    if ($Config.Paths -and $Config.Paths.Reports) {
+    if (-not [string]::IsNullOrWhiteSpace($ReportPath)) {
+
+        $ReportFolder = [System.IO.Path]::GetFullPath($ReportPath)
+    }
+    elseif ($Config.Paths -and $Config.Paths.Reports) {
 
         $ReportFolder = Join-Path `
             $ProjectRoot `
@@ -166,49 +330,59 @@ try {
     }
 
 
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Resolve log folder
+    # -------------------------------------------------------------------------
+
+    if (-not [string]::IsNullOrWhiteSpace($LogPath)) {
+
+        $LogFolder = [System.IO.Path]::GetFullPath($LogPath)
+    }
+    elseif ($Config.Paths -and $Config.Paths.Logs) {
+
+        $LogFolder = Join-Path `
+            $ProjectRoot `
+            $Config.Paths.Logs
+    }
+    else {
+
+        $LogFolder = Join-Path `
+            $ProjectRoot `
+            'Logs'
+    }
+
+
+    # -------------------------------------------------------------------------
     # Initialize logging
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
-        if ($Config.Paths -and $Config.Paths.Logs) {
-
-            $LogFolder = Join-Path `
-                $ProjectRoot `
-                $Config.Paths.Logs
-
-        }
-        else {
-
-            $LogFolder = Join-Path `
-                $ProjectRoot `
-                'Logs'
-        }
-
-        Initialize-Logging `
-            -LogFolder $LogFolder |
-            Out-Null
+    Initialize-Logging `
+        -LogFolder $LogFolder |
+        Out-Null
 
 
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Validate environment
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
-        Test-ProfMigEnvironment
+    Test-ProfMigEnvironment
 
-        # -------------------------------------------------------------------------
+
+    # -------------------------------------------------------------------------
     # Display startup information
-        # -------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
 
-        Show-ProfMigBanner
+    Show-ProfMigBanner
 
-        Write-Success 'Core Framework loaded successfully.'
-        Write-Info 'Logging initialized.'
-        Write-Info 'ProfMig startup completed.'
+    Write-Success 'Core Framework loaded successfully.'
+    Write-Info 'Logging initialized.'
+    Write-Info 'ProfMig startup completed.'
 
-        Write-Info (
-            'Generic application framework loaded. ' +
-            "$($ApplicationDefinitions.Count) definition(s) available."
-        )
+    Write-Info (
+        'Generic application framework loaded. ' +
+        "$($ApplicationDefinitions.Count) definition(s) available."
+    )
+
 
     # -------------------------------------------------------------------------
     # Build Windows profile inventory
@@ -221,10 +395,13 @@ try {
             -ExcludedProfiles $Config.ExcludedProfiles
     )
 
-    Write-Info "Profile inventory completed. $($Profiles.Count) profile(s) found."
-
+    Write-Info (
+        "Profile inventory completed. " +
+        "$($Profiles.Count) profile(s) found."
+    )
 
     if ($Profiles.Count -eq 0) {
+
         throw (
             New-ProfMigException `
                 -Message 'No Windows user profiles were found.' `
@@ -236,26 +413,180 @@ try {
     }
 
 
-    # -------------------------------------------------------------------------
-    # Start interactive ProfMig menu
-    # -------------------------------------------------------------------------
+    # =========================================================================
+    # Interactive mode
+    # =========================================================================
 
-    Write-Info 'Starting interactive menu.'
+    if (-not $Silent) {
 
-    $null = Start-ProfMigMenu `
-        -Configuration $Config `
-        -Profiles $Profiles `
-        -ReportFolder $ReportFolder `
-        -ApplicationDefinitions $ApplicationDefinitions
+        Write-Info 'Starting interactive menu.'
 
-    # -------------------------------------------------------------------------
-    # Shutdown
-    # -------------------------------------------------------------------------
+        $null = Start-ProfMigMenu `
+            -Configuration $Config `
+            -Profiles $Profiles `
+            -ReportFolder $ReportFolder `
+            -ApplicationDefinitions $ApplicationDefinitions
 
-    Write-Info 'ProfMig session completed.'
+        Write-Info 'ProfMig session completed.'
 
-    Stop-ProfMig
+        Stop-ProfMig
+    }
 
+
+    # =========================================================================
+    # Silent mode
+    # =========================================================================
+
+    else {
+
+        Write-Info 'Starting silent migration.'
+
+
+        # ---------------------------------------------------------------------
+        # Resolve source and destination profiles
+        # ---------------------------------------------------------------------
+
+        if (-not [string]::IsNullOrWhiteSpace($SourceSid)) {
+
+            $SourceProfile = Resolve-ProfMigProfile `
+                -Profiles $Profiles `
+                -Sid $SourceSid
+
+            $DestinationProfile = Resolve-ProfMigProfile `
+                -Profiles $Profiles `
+                -Sid $DestinationSid
+        }
+        else {
+
+            $SourceProfile = Resolve-ProfMigProfile `
+                -Profiles $Profiles `
+                -ProfilePath $SourceProfilePath
+
+            $DestinationProfile = Resolve-ProfMigProfile `
+                -Profiles $Profiles `
+                -ProfilePath $DestinationProfilePath
+        }
+
+        $null = Test-ProfMigMigrationProfiles `
+            -SourceProfile $SourceProfile `
+            -DestinationProfile $DestinationProfile
+
+        Write-Info (
+            'Silent source profile resolved: ' +
+            $SourceProfile.ProfilePath
+        )
+
+        Write-Info (
+            'Silent destination profile resolved: ' +
+            $DestinationProfile.ProfilePath
+        )
+
+
+        # ---------------------------------------------------------------------
+        # Detect applications
+        # ---------------------------------------------------------------------
+
+        $SelectedApplications = @()
+
+        if (-not $SkipApplications) {
+
+            Write-Info 'Starting silent application detection.'
+
+            $ApplicationInventory = @(
+                Get-ProfMigApplicationInventory `
+                    -SourceProfilePath $SourceProfile.ProfilePath `
+                    -ApplicationDefinitions $ApplicationDefinitions
+            )
+
+            $SelectedApplications = @(
+                $ApplicationInventory |
+                    Where-Object {
+                        $_.Detected -eq $true -and
+                        $_.Id -notlike 'ProfMig.Test*'
+                    }
+            )
+
+            Write-Info (
+                'Silent application detection selected ' +
+                "$($SelectedApplications.Count) application(s)."
+            )
+
+            foreach ($application in $SelectedApplications) {
+
+                Write-Info (
+                    'Selected application: ' +
+                    "$($application.Name) [$($application.Id)]"
+                )
+            }
+        }
+        else {
+
+            Write-Info (
+                'Application migration skipped by command-line option.'
+            )
+        }
+
+
+        # ---------------------------------------------------------------------
+        # Execute migration
+        # ---------------------------------------------------------------------
+
+        $Migration = Invoke-ProfMigMigration `
+            -Configuration $Config `
+            -SourceProfile $SourceProfile `
+            -DestinationProfile $DestinationProfile `
+            -ReportFolder $ReportFolder `
+            -SelectedApplications $SelectedApplications
+
+
+        # ---------------------------------------------------------------------
+        # Silent migration result
+        # ---------------------------------------------------------------------
+
+        Write-Info (
+            'Silent migration completed with status: ' +
+            $Migration.Status
+        )
+
+        if (
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Migration.ReportPath
+            )
+        ) {
+
+            Write-Info (
+                'Migration report: ' +
+                $Migration.ReportPath
+            )
+        }
+
+
+        # ---------------------------------------------------------------------
+        # Determine successful process exit code
+        # ---------------------------------------------------------------------
+
+        $resultName = 'Success'
+
+        if ($Migration.Status -match 'Warning') {
+            $resultName = 'SuccessWithWarnings'
+        }
+        elseif (
+            $Migration.Status -match 'Fail|Error'
+        ) {
+            $resultName = 'MigrationFailed'
+        }
+
+        $exitCode = Get-ProfMigExitCode `
+            -Result $resultName
+
+        Write-Info (
+            "ProfMig silent-mode exit code: $exitCode"
+        )
+
+        Stop-ProfMig
+
+        exit $exitCode
+    }
 }
 
 catch {
@@ -273,6 +604,7 @@ catch {
     $severity = 'Critical'
     $recoveryAction = 'Stop'
     $reason = 'UnhandledException'
+
 
     # -------------------------------------------------------------------------
     # Read ProfMig metadata when available
@@ -296,7 +628,9 @@ catch {
         $null -ne $caughtException.Data -and
         $caughtException.Data.Contains('ProfMigRecoveryAction')
     ) {
-        $recoveryAction = [string]$caughtException.Data['ProfMigRecoveryAction']
+        $recoveryAction = [string]$caughtException.Data[
+            'ProfMigRecoveryAction'
+        ]
     }
 
     if (
@@ -305,6 +639,7 @@ catch {
     ) {
         $reason = [string]$caughtException.Data['ProfMigReason']
     }
+
 
     # -------------------------------------------------------------------------
     # Build standardized ProfMig error
@@ -322,6 +657,7 @@ catch {
             -Exception $caughtException `
             -RecoveryAction $recoveryAction
 
+
         # ---------------------------------------------------------------------
         # Determine process exit code
         # ---------------------------------------------------------------------
@@ -329,34 +665,42 @@ catch {
         switch ($category) {
 
             'ConfigurationError' {
-                $exitCode = Get-ProfMigExitCode -Result 'ConfigurationError'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'ConfigurationError'
             }
 
             'ValidationError' {
-                $exitCode = Get-ProfMigExitCode -Result 'ValidationError'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'ValidationError'
             }
 
             'PermissionError' {
-                $exitCode = Get-ProfMigExitCode -Result 'PermissionError'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'PermissionError'
             }
 
             'InsufficientStorage' {
-                $exitCode = Get-ProfMigExitCode -Result 'InsufficientStorage'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'InsufficientStorage'
             }
 
             'VerificationError' {
-                $exitCode = Get-ProfMigExitCode -Result 'VerificationError'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'VerificationError'
             }
 
             'ApplicationMigrationError' {
-                $exitCode = Get-ProfMigExitCode -Result 'ApplicationMigrationError'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'ApplicationMigrationError'
             }
 
             default {
-                $exitCode = Get-ProfMigExitCode -Result 'UnexpectedError'
+                $exitCode = Get-ProfMigExitCode `
+                    -Result 'UnexpectedError'
             }
         }
     }
+
 
     # -------------------------------------------------------------------------
     # Log standardized ProfMig error when logging is available
@@ -370,16 +714,20 @@ catch {
         $null -ne $profMigError -and
         (Get-Command Write-ProfMigError -ErrorAction SilentlyContinue)
     ) {
+
         try {
+
             Write-ProfMigError `
                 -ErrorObject $profMigError
         }
         catch {
+
             Write-Host (
                 'Warning: the error could not be written to the ProfMig log.'
             ) -ForegroundColor Yellow
         }
     }
+
 
     # -------------------------------------------------------------------------
     # Console fallback
@@ -389,7 +737,9 @@ catch {
     # -------------------------------------------------------------------------
 
     Write-Host ''
-    Write-Host 'ProfMig encountered a critical error.' -ForegroundColor Red
+    Write-Host (
+        'ProfMig encountered a critical error.'
+    ) -ForegroundColor Red
 
     if ($null -ne $profMigError) {
 
@@ -402,7 +752,9 @@ catch {
         ) -ForegroundColor Red
     }
     else {
-        Write-Host $caughtException.Message -ForegroundColor Red
+
+        Write-Host $caughtException.Message `
+            -ForegroundColor Red
     }
 
     Write-Host ''
