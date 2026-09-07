@@ -373,11 +373,12 @@ function Invoke-ProfMigMigration {
             "$($SelectedApplications.Count) application(s)."
         )
 
-        $applicationMigrationResult = `
+        $applicationMigrationResult =
             Invoke-ProfMigSelectedApplicationMigration `
                 -Applications $SelectedApplications `
                 -SourceProfile $SourceProfile.ProfilePath `
-                -DestinationProfile $DestinationProfile.ProfilePath
+                -DestinationProfile $DestinationProfile.ProfilePath `
+                -Configuration $migrationConfiguration
     }
     else {
 

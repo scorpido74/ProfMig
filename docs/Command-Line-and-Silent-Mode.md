@@ -250,6 +250,62 @@ When no explicit folder selection is configured, ProfMig uses its standard profi
 
 ---
 
+### `-MigrationProfile`
+
+Selects a reusable migration profile for the current silent migration.
+
+Example:
+
+```text
+-MigrationProfile Standard
+```
+
+Built-in migration profiles are stored in:
+
+```text
+src\Profiles
+```
+
+The profile location is controlled through `Paths.MigrationProfiles` in the ProfMig configuration.
+
+When only a profile name is supplied, the `.psd1` extension is optional. For example:
+
+```text
+-MigrationProfile Standard
+```
+
+resolves to:
+
+```text
+src\Profiles\Standard.psd1
+```
+
+An absolute path to a custom migration profile can also be supplied:
+
+```text
+-MigrationProfile 'C:\ProgramData\ProfMig\Profiles\Workstation.psd1'
+```
+
+Before migration starts, ProfMig validates the migration profile and merges it with the central ProfMig configuration.
+
+A migration profile can control:
+
+- Profile components
+- Application migration
+- Application selection
+- Verification level
+
+Global settings such as retry behavior, storage safety margins, exclusions, logging, and reporting remain part of the effective migration configuration.
+
+If the requested profile does not exist or contains invalid configuration, ProfMig stops with a structured configuration error. It does not silently fall back to another migration profile.
+
+When `-MigrationProfile` is not supplied, ProfMig retains the existing migration behavior for backward compatibility.
+
+See `Configuration-and-Migration-Profiles.md` for the complete migration-profile configuration model.
+
+---
+
+
 ### `-LogPath`
 
 Overrides the configured ProfMig log location.
