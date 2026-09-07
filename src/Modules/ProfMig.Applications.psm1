@@ -782,7 +782,10 @@ function Invoke-ProfMigSelectedApplicationMigration {
         [string]$SourceProfile,
 
         [Parameter(Mandatory)]
-        [string]$DestinationProfile
+        [string]$DestinationProfile,
+
+        [Parameter()]
+        [hashtable]$Configuration
     )
 
     $startedAt = Get-Date
@@ -815,17 +818,17 @@ function Invoke-ProfMigSelectedApplicationMigration {
                 switch ($application.Id) {
 
                     'Microsoft.Edge' {
-
                         $migrationResult = Invoke-ProfMigEdgeMigration `
                             -SourceProfile $SourceProfile `
-                            -DestinationProfile $DestinationProfile
+                            -DestinationProfile $DestinationProfile `
+                            -Configuration $Configuration
                     }
 
                     'Google.Chrome' {
-
                         $migrationResult = Invoke-ProfMigChromeMigration `
                             -SourceProfile $SourceProfile `
-                            -DestinationProfile $DestinationProfile
+                            -DestinationProfile $DestinationProfile `
+                            -Configuration $Configuration
                     }
 
                     'Microsoft.Outlook' {
@@ -863,7 +866,8 @@ function Invoke-ProfMigSelectedApplicationMigration {
                 $migrationResult = Invoke-ProfMigApplicationMigration `
                     -Definition $application.Definition `
                     -SourceProfile $SourceProfile `
-                    -DestinationProfile $DestinationProfile
+                    -DestinationProfile $DestinationProfile `
+                    -Configuration $Configuration
             }
 
             else {

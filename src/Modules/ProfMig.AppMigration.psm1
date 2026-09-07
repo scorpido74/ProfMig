@@ -870,11 +870,55 @@ function Invoke-ProfMigApplicationMigration {
         [string]$SourceProfile,
 
         [Parameter(Mandatory)]
-        [string]$DestinationProfile
+        [string]$DestinationProfile,
+
+        [Parameter()]
+        [hashtable]$Configuration
     )
 
     $startedAt = Get-Date
 
+    # -----------------------------------------------------------------------
+    # Resolve copy configuration
+    # -----------------------------------------------------------------------
+
+    $retryCount = 3
+    $retryDelaySeconds = 2
+    $verificationLevel = 'Standard'
+    $hashAlgorithm = 'SHA256'
+
+    if ($null -ne $Configuration) {
+
+        if (
+            $Configuration.ContainsKey('Retry') -and
+            $null -ne $Configuration.Retry
+        ) {
+            if ($Configuration.Retry.ContainsKey('Count')) {
+                $retryCount = [int]$Configuration.Retry.Count
+            }
+
+            if ($Configuration.Retry.ContainsKey('DelaySeconds')) {
+                $retryDelaySeconds = [int]$Configuration.Retry.DelaySeconds
+            }
+        }
+
+        if (
+            $Configuration.ContainsKey('Verification') -and
+            $null -ne $Configuration.Verification
+        ) {
+            if ($Configuration.Verification.ContainsKey('Level')) {
+                $verificationLevel = [string](
+                    $Configuration.Verification.Level
+                )
+            }
+
+            if ($Configuration.Verification.ContainsKey('HashAlgorithm')) {
+                $hashAlgorithm = [string](
+                    $Configuration.Verification.HashAlgorithm
+                )
+            }
+        }
+    }
 
     # -----------------------------------------------------------------------
     # Ensure CopyEngine integration is available
@@ -1076,7 +1120,11 @@ function Invoke-ProfMigApplicationMigration {
         $copyResult = Invoke-ProfMigFileCopy `
             -Component $componentName `
             -SourceFile $item.SourceFile `
-            -DestinationFile $item.DestinationFile
+            -DestinationFile $item.DestinationFile `
+            -RetryCount $retryCount `
+            -RetryDelaySeconds $retryDelaySeconds `
+            -VerificationLevel $verificationLevel `
+            -HashAlgorithm $hashAlgorithm
 
         $components += $copyResult
 

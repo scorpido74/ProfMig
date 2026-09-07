@@ -63,6 +63,9 @@ param (
     [string]$ConfigPath,
 
     [Parameter()]
+    [string]$MigrationProfile,
+
+    [Parameter()]
     [string]$LogPath,
 
     [Parameter()]
@@ -443,6 +446,66 @@ try {
 
 
         # ---------------------------------------------------------------------
+        # Resolve migration configuration
+        # ---------------------------------------------------------------------
+
+        $MigrationConfiguration = $Config
+
+        if (-not [string]::IsNullOrWhiteSpace($MigrationProfile)) {
+
+            $MigrationProfilePath = $MigrationProfile
+
+            if (-not [System.IO.Path]::IsPathRooted($MigrationProfilePath)) {
+
+                if (
+                    $Config.Paths -and
+                    $Config.Paths.MigrationProfiles
+                ) {
+                    $MigrationProfileFolder = Join-Path `
+                        $SourceRoot `
+                        $Config.Paths.MigrationProfiles
+                }
+                else {
+                    $MigrationProfileFolder = Join-Path `
+                        $SourceRoot `
+                        'Profiles'
+                }
+
+                if (
+                    [System.IO.Path]::GetExtension(
+                        $MigrationProfilePath
+                    ) -ne '.psd1'
+                ) {
+                    $MigrationProfilePath += '.psd1'
+                }
+
+                $MigrationProfilePath = Join-Path `
+                    $MigrationProfileFolder `
+                    $MigrationProfilePath
+            }
+
+            $LoadedMigrationProfile = Import-ProfMigMigrationProfile `
+                -Path $MigrationProfilePath
+
+            $MigrationConfiguration = Merge-ProfMigMigrationProfile `
+                -Configuration $Config `
+                -Profile $LoadedMigrationProfile
+
+            Write-Info (
+                'Using migration profile: ' +
+                $MigrationConfiguration.MigrationProfile.Name
+            )
+        }
+        else {
+
+            Write-Info (
+                'No migration profile specified. ' +
+                'Using standard ProfMig configuration.'
+            )
+        }
+
+
+        # ---------------------------------------------------------------------
         # Resolve source and destination profiles
         # ---------------------------------------------------------------------
 
@@ -487,8 +550,18 @@ try {
         # ---------------------------------------------------------------------
 
         $SelectedApplications = @()
+        $ProfileApplicationsEnabled = $true
 
-        if (-not $SkipApplications) {
+        if (
+            $MigrationConfiguration.ContainsKey('MigrationApplications') -and
+            $null -ne $MigrationConfiguration.MigrationApplications
+        ) {
+            $ProfileApplicationsEnabled = [bool](
+                $MigrationConfiguration.MigrationApplications.Enabled
+            )
+        }
+
+        if (-not $SkipApplications -and $ProfileApplicationsEnabled) {
 
             Write-Info 'Starting silent application detection.'
 
@@ -506,6 +579,32 @@ try {
                     }
             )
 
+            # -----------------------------------------------------------------
+            # Apply migration profile application selection
+            # -----------------------------------------------------------------
+
+            if (
+                $MigrationConfiguration.ContainsKey(
+                    'MigrationApplications'
+                ) -and
+                $null -ne $MigrationConfiguration.MigrationApplications -and
+                @(
+                    $MigrationConfiguration.MigrationApplications.Include
+                ).Count -gt 0
+            ) {
+
+                $IncludedApplications = @(
+                    $MigrationConfiguration.MigrationApplications.Include
+                )
+
+                $SelectedApplications = @(
+                    $SelectedApplications |
+                        Where-Object {
+                            $_.Id -in $IncludedApplications
+                        }
+                )
+            }
+
             Write-Info (
                 'Silent application detection selected ' +
                 "$($SelectedApplications.Count) application(s)."
@@ -519,10 +618,16 @@ try {
                 )
             }
         }
-        else {
+        elseif ($SkipApplications) {
 
             Write-Info (
                 'Application migration skipped by command-line option.'
+            )
+        }
+        else {
+
+            Write-Info (
+                'Application migration disabled by migration profile.'
             )
         }
 
@@ -532,7 +637,7 @@ try {
         # ---------------------------------------------------------------------
 
         $Migration = Invoke-ProfMigMigration `
-            -Configuration $Config `
+            -Configuration $MigrationConfiguration `
             -SourceProfile $SourceProfile `
             -DestinationProfile $DestinationProfile `
             -ReportFolder $ReportFolder `

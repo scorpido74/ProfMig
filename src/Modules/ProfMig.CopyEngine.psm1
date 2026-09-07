@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Core copy engine for ProfMig.
 
@@ -986,6 +986,14 @@ function Copy-ProfMigComponent {
         [string[]]$Exclusions = @(),
 
         [Parameter()]
+        [ValidateRange(0, 10)]
+        [int]$RetryCount = 3,
+
+        [Parameter()]
+        [ValidateRange(0, 60)]
+        [int]$RetryDelaySeconds = 2,
+
+        [Parameter()]
         [ValidateSet('Standard', 'Hash')]
         [string]$VerificationLevel = 'Standard',
 
@@ -1112,6 +1120,8 @@ function Copy-ProfMigComponent {
                 -DestinationFile $DestinationPath `
                 -RelativePath $relativePath `
                 -Exclusions $Exclusions `
+                -RetryCount $RetryCount `
+                -RetryDelaySeconds $RetryDelaySeconds `
                 -VerificationLevel $VerificationLevel `
                 -HashAlgorithm $HashAlgorithm
 
@@ -1350,6 +1360,8 @@ function Copy-ProfMigComponent {
                     -DestinationFile $destinationFile `
                     -RelativePath $relativePath `
                     -Exclusions $Exclusions `
+                    -RetryCount $RetryCount `
+                    -RetryDelaySeconds $RetryDelaySeconds `
                     -VerificationLevel $VerificationLevel `
                     -HashAlgorithm $HashAlgorithm
 
@@ -1477,6 +1489,14 @@ function Invoke-ProfMigComponentCopy {
         [string[]]$Exclusions = @(),
 
         [Parameter()]
+        [ValidateRange(0, 10)]
+        [int]$RetryCount = 3,
+
+        [Parameter()]
+        [ValidateRange(0, 60)]
+        [int]$RetryDelaySeconds = 2,
+
+        [Parameter()]
         [ValidateSet('Standard', 'Hash')]
         [string]$VerificationLevel = 'Standard',
 
@@ -1490,6 +1510,8 @@ function Invoke-ProfMigComponentCopy {
         -SourcePath $SourcePath `
         -DestinationPath $DestinationPath `
         -Exclusions $Exclusions `
+        -RetryCount $RetryCount `
+        -RetryDelaySeconds $RetryDelaySeconds `
         -VerificationLevel $VerificationLevel `
         -HashAlgorithm $HashAlgorithm
 }
@@ -1598,6 +1620,44 @@ function Invoke-ProfMigCopy {
         $null -ne $Configuration.Exclusions
     ) {
         $exclusions = @($Configuration.Exclusions)
+    }
+
+    $retryCount = 3
+    $retryDelaySeconds = 2
+
+    if (
+        $Configuration.ContainsKey('Retry') -and
+        $null -ne $Configuration.Retry
+    ) {
+        if ($Configuration.Retry.ContainsKey('Count')) {
+            $retryCount = [int]$Configuration.Retry.Count
+        }
+
+        if ($Configuration.Retry.ContainsKey('DelaySeconds')) {
+            $retryDelaySeconds = [int]$Configuration.Retry.DelaySeconds
+        }
+    }
+
+    if ($retryCount -lt 0 -or $retryCount -gt 10) {
+        throw (
+            New-ProfMigException `
+                -Message "Invalid retry count: $retryCount" `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'InvalidRetryCount'
+        )
+    }
+
+    if ($retryDelaySeconds -lt 0 -or $retryDelaySeconds -gt 60) {
+        throw (
+            New-ProfMigException `
+                -Message "Invalid retry delay: $retryDelaySeconds" `
+                -Category 'ConfigurationError' `
+                -Severity 'Critical' `
+                -RecoveryAction 'Stop' `
+                -Reason 'InvalidRetryDelay'
+        )
     }
 
     $verificationLevel = 'Standard'
@@ -1763,6 +1823,8 @@ function Invoke-ProfMigCopy {
             -SourcePath (Join-Path $resolvedSource $folder) `
             -DestinationPath $destinationComponentPath `
             -Exclusions $exclusions `
+            -RetryCount $retryCount `
+            -RetryDelaySeconds $retryDelaySeconds `
             -VerificationLevel $verificationLevel `
             -HashAlgorithm $hashAlgorithm
 
@@ -1873,6 +1935,8 @@ function Invoke-ProfMigCopy {
             -SourcePath (Join-Path $resolvedSource $normalizedFolder) `
             -DestinationPath $destinationComponentPath `
             -Exclusions $exclusions `
+            -RetryCount $retryCount `
+            -RetryDelaySeconds $retryDelaySeconds `
             -VerificationLevel $verificationLevel `
             -HashAlgorithm $hashAlgorithm
 
@@ -2004,6 +2068,8 @@ function Invoke-ProfMigCopy {
         VerificationFailures = $totalVerificationFailures
         VerificationLevel    = $verificationLevel
         HashAlgorithm        = $hashAlgorithm
+        RetryCount           = $retryCount
+        RetryDelaySeconds    = $retryDelaySeconds
         PermissionsChecked   = $permissionsChecked
         PermissionsRepaired = $permissionsRepaired
         PermissionWarnings  = $permissionWarnings
@@ -2088,6 +2154,14 @@ function Invoke-ProfMigFileCopy {
 
         [Parameter(Mandatory)]
         [string]$DestinationFile,
+
+        [Parameter()]
+        [ValidateRange(0, 10)]
+        [int]$RetryCount = 3,
+
+        [Parameter()]
+        [ValidateRange(0, 60)]
+        [int]$RetryDelaySeconds = 2,
 
         [Parameter()]
         [ValidateSet('Standard', 'Hash')]
@@ -2229,6 +2303,8 @@ function Invoke-ProfMigFileCopy {
         -DestinationFile $DestinationFile `
         -RelativePath $relativePath `
         -Exclusions @() `
+        -RetryCount $RetryCount `
+        -RetryDelaySeconds $RetryDelaySeconds `
         -VerificationLevel $VerificationLevel `
         -HashAlgorithm $HashAlgorithm
 

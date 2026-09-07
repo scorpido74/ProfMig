@@ -1287,7 +1287,8 @@ function Start-ProfMigMenu {
                             Invoke-ProfMigSelectedApplicationMigration `
                                 -Applications $selectedApplications `
                                 -SourceProfile $sourceProfile.ProfilePath `
-                                -DestinationProfile $destinationProfile.ProfilePath
+                                -DestinationProfile $destinationProfile.ProfilePath `
+                                -Configuration $Configuration
 
                         Show-ProfMigApplicationMigrationResult `
                             -Result $applicationMigrationResult
