@@ -87,16 +87,16 @@ function Get-ProfMigEdgeProfiles {
         }
     )
 
-    foreach ($profile in $profiles) {
+    foreach ($edgeProfile in $profiles) {
 
         $preferencesPath = Join-Path `
-            $profile.FullName `
+            $edgeProfile.FullName `
             'Preferences'
 
         [PSCustomObject]@{
             Browser         = 'Microsoft Edge'
-            ProfileName     = $profile.Name
-            ProfilePath     = $profile.FullName
+            ProfileName     = $edgeProfile.Name
+            ProfilePath     = $edgeProfile.FullName
             PreferencesPath = $preferencesPath
             HasPreferences  = Test-Path -LiteralPath $preferencesPath
         }

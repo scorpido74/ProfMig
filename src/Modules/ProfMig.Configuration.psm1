@@ -340,7 +340,8 @@ function Test-ProfMigMigrationProfile {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory)]
-        [System.Collections.IDictionary]$Profile
+        [Alias('Profile')]
+        [System.Collections.IDictionary]$migrationProfile
     )
 
     $supportedSchemaVersions = @(
@@ -369,9 +370,9 @@ function Test-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     if (
-        -not $Profile.Contains('SchemaVersion') -or
+        -not $migrationProfile.Contains('SchemaVersion') -or
         [string]::IsNullOrWhiteSpace(
-            [string]$Profile.SchemaVersion
+            [string]$migrationProfile.SchemaVersion
         )
     ) {
         throw (
@@ -385,13 +386,13 @@ function Test-ProfMigMigrationProfile {
     }
 
     if (
-        [string]$Profile.SchemaVersion -notin $supportedSchemaVersions
+        [string]$migrationProfile.SchemaVersion -notin $supportedSchemaVersions
     ) {
         throw (
             New-ProfMigException `
                 -Message (
                     'Unsupported migration profile schema version: ' +
-                    [string]$Profile.SchemaVersion
+                    [string]$migrationProfile.SchemaVersion
                 ) `
                 -Category 'ConfigurationError' `
                 -Severity 'Critical' `
@@ -405,11 +406,11 @@ function Test-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     if (
-        -not $Profile.Contains('Profile') -or
-        $null -eq $Profile.Profile -or
-        -not $Profile.Profile.Contains('Name') -or
+        -not $migrationProfile.Contains('Profile') -or
+        $null -eq $migrationProfile.Profile -or
+        -not $migrationProfile.Profile.Contains('Name') -or
         [string]::IsNullOrWhiteSpace(
-            [string]$Profile.Profile.Name
+            [string]$migrationProfile.Profile.Name
         )
     ) {
         throw (
@@ -427,8 +428,8 @@ function Test-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     if (
-        -not $Profile.Contains('Components') -or
-        $null -eq $Profile.Components
+        -not $migrationProfile.Contains('Components') -or
+        $null -eq $migrationProfile.Components
     ) {
         throw (
             New-ProfMigException `
@@ -440,7 +441,7 @@ function Test-ProfMigMigrationProfile {
         )
     }
 
-    foreach ($component in @($Profile.Components)) {
+    foreach ($component in @($migrationProfile.Components)) {
 
         if ([string]$component -notin $supportedComponents) {
 
@@ -463,11 +464,11 @@ function Test-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     if (
-        $Profile.Contains('Applications') -and
-        $null -ne $Profile.Applications
+        $migrationProfile.Contains('Applications') -and
+        $null -ne $migrationProfile.Applications
     ) {
 
-        $applications = $Profile.Applications
+        $applications = $migrationProfile.Applications
 
         if (
             $applications.Contains('Enabled') -and
@@ -515,13 +516,13 @@ function Test-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     if (
-        $Profile.Contains('Verification') -and
-        $null -ne $Profile.Verification -and
-        $Profile.Verification.Contains('Level')
+        $migrationProfile.Contains('Verification') -and
+        $null -ne $migrationProfile.Verification -and
+        $migrationProfile.Verification.Contains('Level')
     ) {
 
         if (
-            [string]$Profile.Verification.Level -notin @(
+            [string]$migrationProfile.Verification.Level -notin @(
                 'Standard'
                 'Hash'
             )
@@ -530,7 +531,7 @@ function Test-ProfMigMigrationProfile {
                 New-ProfMigException `
                     -Message (
                         'Invalid migration profile verification level: ' +
-                        [string]$Profile.Verification.Level
+                        [string]$migrationProfile.Verification.Level
                     ) `
                     -Category 'ConfigurationError' `
                     -Severity 'Critical' `
@@ -573,7 +574,7 @@ function Import-ProfMigMigrationProfile {
     }
 
     try {
-        $profile = Import-PowerShellDataFile `
+        $migrationProfile = Import-PowerShellDataFile `
             -LiteralPath $Path `
             -ErrorAction Stop
     }
@@ -592,9 +593,9 @@ function Import-ProfMigMigrationProfile {
     }
 
     $null = Test-ProfMigMigrationProfile `
-        -Profile $profile
+        -Profile $migrationProfile
 
-    return $profile
+    return $migrationProfile
 }
 
 # ============================================================================
@@ -609,14 +610,15 @@ function Merge-ProfMigMigrationProfile {
         [System.Collections.IDictionary]$Configuration,
 
         [Parameter(Mandatory)]
-        [System.Collections.IDictionary]$Profile
+        [Alias('Profile')]
+        [System.Collections.IDictionary]$migrationProfile
     )
 
     $null = Test-ProfMigConfigurationSchema `
         -Configuration $Configuration
 
     $null = Test-ProfMigMigrationProfile `
-        -Profile $Profile
+        -Profile $migrationProfile
 
     # Create a new configuration instead of modifying the global
     # configuration object supplied by the caller.
@@ -633,7 +635,7 @@ function Merge-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     $effectiveConfiguration['Folders'] = @(
-        $Profile.Components
+        $migrationProfile.Components
     )
 
     # ------------------------------------------------------------------------
@@ -646,19 +648,19 @@ function Merge-ProfMigMigrationProfile {
     }
 
     if (
-        $Profile.Contains('Applications') -and
-        $null -ne $Profile.Applications
+        $migrationProfile.Contains('Applications') -and
+        $null -ne $migrationProfile.Applications
     ) {
-        if ($Profile.Applications.Contains('Enabled')) {
-            $applications.Enabled = [bool]$Profile.Applications.Enabled
+        if ($migrationProfile.Applications.Contains('Enabled')) {
+            $applications.Enabled = [bool]$migrationProfile.Applications.Enabled
         }
 
         if (
-            $Profile.Applications.Contains('Include') -and
-            $null -ne $Profile.Applications.Include
+            $migrationProfile.Applications.Contains('Include') -and
+            $null -ne $migrationProfile.Applications.Include
         ) {
             $applications.Include = @(
-                $Profile.Applications.Include
+                $migrationProfile.Applications.Include
             )
         }
     }
@@ -684,11 +686,11 @@ function Merge-ProfMigMigrationProfile {
     }
 
     if (
-        $Profile.Contains('Verification') -and
-        $null -ne $Profile.Verification -and
-        $Profile.Verification.Contains('Level')
+        $migrationProfile.Contains('Verification') -and
+        $null -ne $migrationProfile.Verification -and
+        $migrationProfile.Verification.Contains('Level')
     ) {
-        $verification['Level'] = [string]$Profile.Verification.Level
+        $verification['Level'] = [string]$migrationProfile.Verification.Level
     }
 
     $effectiveConfiguration['Verification'] = $verification
@@ -698,13 +700,13 @@ function Merge-ProfMigMigrationProfile {
     # ------------------------------------------------------------------------
 
     $effectiveConfiguration['MigrationProfile'] = @{
-        Name          = [string]$Profile.Profile.Name
-        SchemaVersion = [string]$Profile.SchemaVersion
+        Name          = [string]$migrationProfile.Profile.Name
+        SchemaVersion = [string]$migrationProfile.SchemaVersion
     }
 
-    if ($Profile.Profile.Contains('Description')) {
+    if ($migrationProfile.Profile.Contains('Description')) {
         $effectiveConfiguration.MigrationProfile['Description'] =
-            [string]$Profile.Profile.Description
+            [string]$migrationProfile.Profile.Description
     }
 
     return $effectiveConfiguration

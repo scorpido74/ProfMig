@@ -1,7 +1,7 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$repositoryRoot = 'C:\GitHub\ProfMig'
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
 $permissionsPath = Join-Path $repositoryRoot 'src\Modules\ProfMig.Permissions.psm1'
 $copyEnginePath = Join-Path $repositoryRoot 'src\Modules\ProfMig.CopyEngine.psm1'
 $validationPath = Join-Path $repositoryRoot 'src\Modules\ProfMig.Validation.psm1'

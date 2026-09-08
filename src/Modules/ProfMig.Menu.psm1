@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 # ProfMig.Menu.psm1
 # ============================================================================
 #
@@ -440,8 +440,8 @@ function Show-ProfMigConfiguration {
 
     Write-Host 'Excluded profiles' -ForegroundColor Cyan
 
-    foreach ($profile in $Configuration.ExcludedProfiles) {
-        Write-Host " - $profile"
+    foreach ($excludedProfile in $Configuration.ExcludedProfiles) {
+        Write-Host " - $excludedProfile"
     }
 
     Write-Host ''

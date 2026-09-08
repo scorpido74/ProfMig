@@ -1863,11 +1863,11 @@ function ConvertTo-ProfMigOutlookCopyResult {
         # Outlook profiles are intentionally recreated rather
         # than copied between Windows users.
         #
-        foreach ($profile in @($plan.OutlookProfiles)) {
+        foreach ($outlookProfile in @($plan.OutlookProfiles)) {
 
             $excludedItems += [PSCustomObject]@{
                 Component  = "Outlook.Profile"
-                SourceFile = $profile.RegistryPath
+                SourceFile = $outlookProfile.RegistryPath
                 Reason     = "Outlook profile configuration is recreated for the destination user."
             }
         }
