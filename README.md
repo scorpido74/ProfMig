@@ -21,77 +21,115 @@
 
 ProfMig is a PowerShell-based Windows profile migration toolkit designed to migrate user data and supported application data between Windows user profiles in a controlled, transparent and extensible way.
 
-The project uses a modular architecture that separates profile discovery, validation, migration, application handling, exclusions, permissions, error handling, verification, logging and reporting.
+The project uses a modular architecture that separates profile discovery, validation, migration, application handling, exclusions, permissions, error handling, verification, logging, reporting and deployment.
 
-This architecture is intended to support interactive operation today while allowing future use through silent execution, automation, endpoint-management platforms and a graphical interface.
+ProfMig supports interactive migration workflows as well as packaged runtime deployment, command-line operation, silent execution and Microsoft Intune Win32 deployment.
+
+---
 
 ## Project status
 
-**Current release stage: M3 – Reliability & Security completed**
+**Current development stage: M5 – Deployment & Operations**
 
-Milestone 3 has been completed and formally approved after validation of ProfMig's migration safety, reliability, permissions, recovery, verification, logging and reporting behaviour.
+Milestone 3 established and formally validated the ProfMig reliability and security baseline.
 
-The formal Milestone 3 validation completed **51 of 51 test scenarios successfully**, with no failed or blocked tests and no remaining Critical or High-severity defects.
+The formal Milestone 3 validation completed:
 
-A reusable Milestone 3 regression suite is also available. The current automated suite contains **47 Pester regression tests**, all of which pass successfully.
+```text
+Tests executed : 51
+Tests passed   : 51
+Tests failed   : 0
+Tests blocked  : 0
 
-ProfMig can currently:
+Open Critical defects : 0
+Open High defects     : 0
 
-- Discover Windows user profiles
-- Select and validate source and destination profiles
-- Resolve Windows known folders for offline profiles
-- Migrate standard Windows profile folders
-- Prevent existing destination files from being overwritten
-- Apply central migration and mandatory security exclusions
-- Track copied, skipped, excluded, failed and verified files
-- Record migration and verification statistics
-- Generate structured migration results
-- Generate human-readable migration reports
-- Write structured operational logs
-- Protect credential-like values and authentication tokens in logs and reports
-- Run through an interactive PowerShell menu
-- Detect supported applications
-- Migrate Microsoft Edge portable profile data
-- Migrate Google Chrome portable profile data
-- Migrate Microsoft Outlook portable data and settings
-- Migrate application data through generic application definitions
-- Perform pre-migration profile and privilege validation
-- Validate destination storage capacity
-- Detect and classify file-access and copy failures
-- Validate and repair destination permissions where appropriate
-- Handle recoverable and critical migration errors through a structured error model
-- Verify migrated files using existence and size validation
-- Optionally verify migrated file content using cryptographic hashes
-- Respect Windows access controls without globally weakening Windows security
+M3 status: APPROVED
+```
 
-Development can now proceed beyond the Milestone 3 reliability and security baseline.
+A reusable Milestone 3 regression suite is also available. The automated baseline contains:
+
+```text
+Total        : 47
+Passed       : 47
+Failed       : 0
+Skipped      : 0
+Pending      : 0
+Inconclusive : 0
+
+M3 AUTOMATED REGRESSION: PASS
+```
+
+Development has since progressed into packaging, automation and endpoint deployment capabilities.
+
+Current functionality includes:
+
+- Windows profile discovery
+- Source and destination profile selection
+- Profile validation
+- Windows known-folder resolution
+- Standard Windows profile data migration
+- Microsoft Edge migration
+- Google Chrome migration
+- Microsoft Outlook migration
+- Generic application migration
+- Central migration exclusions
+- Mandatory security exclusions
+- Storage-capacity validation
+- File-access and locked-file handling
+- Destination permissions and ACL validation
+- Structured error handling and recovery
+- Migration verification
+- Optional SHA256 verification
+- Structured logging
+- Migration reporting
+- Sensitive-data protection in logs and reports
+- Interactive migration operation
+- Command-line and silent operation
+- Runtime packaging
+- Version and build metadata
+- Controlled deployment and upgrade
+- Runtime uninstall
+- Microsoft Intune Win32 packaging
+- Version-specific Intune detection
+- SYSTEM-context runtime deployment
+
+---
 
 ## Current migration components
 
 ### Windows profile data
 
-The Core Migration Engine currently supports migration of standard Windows user data including:
+ProfMig supports migration of standard Windows user data including:
 
 - Desktop
 - Documents
 - Downloads
 - Pictures
+- Music
+- Videos
+- Favorites
+- Links
 
 Windows known folders are resolved against the selected source and destination profiles, including offline profiles.
+
+Existing destination files are protected from accidental overwrite.
+
+---
 
 ### Microsoft Edge
 
 ProfMig can detect Microsoft Edge profiles and migrate validated portable browser data.
 
-Supported migration currently includes data such as:
+Supported migration includes portable data such as:
 
 - Bookmarks
 - Bookmark backups
 - Favicons
 
-Security-sensitive and non-portable Edge data is excluded or held for review.
+Security-sensitive and non-portable data is excluded or held for review.
 
-This includes data such as:
+Examples include:
 
 - Credentials
 - Cookies
@@ -99,13 +137,15 @@ This includes data such as:
 - Session storage
 - Authentication-related data
 
-Additional portable Edge data remains subject to further validation.
+ProfMig does not attempt to transfer browser authentication state that cannot be migrated safely.
+
+---
 
 ### Google Chrome
 
 ProfMig can detect and migrate multiple Google Chrome profiles.
 
-Validated migration includes portable profile data while browser security exclusions prevent known sensitive or non-portable data from being transferred.
+Validated migration includes portable profile data while browser security exclusions prevent known sensitive or non-portable information from being transferred.
 
 Examples of excluded data include:
 
@@ -117,6 +157,8 @@ Examples of excluded data include:
 - Other security-sensitive browser data
 
 Existing destination Chrome data is protected from accidental overwrite.
+
+---
 
 ### Microsoft Outlook
 
@@ -142,6 +184,8 @@ Examples include:
 
 Outlook authentication and account configuration must be re-established where required.
 
+---
+
 ### Generic application migration
 
 ProfMig includes a generic application migration framework.
@@ -150,12 +194,15 @@ Application definitions can describe:
 
 - Application identity
 - Detection rules
-- Source and destination locations
+- Source locations
+- Destination locations
 - Include rules
 - Exclude rules
 - Validation rules
 
 This allows additional applications to be supported without implementing a dedicated PowerShell migration module for every application.
+
+---
 
 ## Architecture
 
@@ -169,6 +216,7 @@ ProfMig
 ├── Logging
 ├── Profile Inventory
 ├── Interactive Menu
+├── Migration Orchestration
 ├── Copy Engine
 ├── Reporting
 ├── Exclusion Engine
@@ -183,7 +231,18 @@ ProfMig
 └── Migration Verification and Data Integrity
 ```
 
-The modules are intentionally separated so migration logic is not tied to a specific user interface.
+The modules are intentionally separated so migration logic is not tied to a specific user interface or deployment mechanism.
+
+This allows the same migration framework to support:
+
+- Interactive operation
+- Command-line operation
+- Silent execution
+- Packaged deployment
+- Endpoint-management deployment
+- Future graphical interfaces
+
+---
 
 ### Copy Engine
 
@@ -201,8 +260,6 @@ It tracks:
 - Bytes verified
 - Verification failures
 - Component results
-- Skipped items
-- Excluded items
 - Structured errors
 - Migration status
 - Verification status
@@ -210,6 +267,8 @@ It tracks:
 Existing destination files are not overwritten.
 
 File-level failures are classified and handled without unnecessarily terminating the complete migration.
+
+---
 
 ### Exclusion Engine
 
@@ -230,6 +289,8 @@ Known credential stores, protected Windows credential data and other security-se
 
 Excluded source data is never deleted.
 
+---
+
 ### Application Migration Framework
 
 Application migration supports two provider models.
@@ -245,6 +306,8 @@ Current native providers include:
 **Generic providers** use application definition files to describe detection, migration and validation behavior.
 
 This provides an extensible mechanism for adding support for additional applications.
+
+---
 
 ### Validation Framework
 
@@ -263,9 +326,13 @@ Validation includes:
 
 Critical validation failures can prevent migration from starting.
 
+Deployment through an endpoint-management platform does not bypass these migration validations.
+
+---
+
 ### Permissions and ACL Handling
 
-ProfMig validates destination permissions and Windows ACL behaviour before and during migration.
+ProfMig validates destination permissions and Windows ACL behavior before and during migration.
 
 Capabilities include:
 
@@ -279,9 +346,11 @@ Capabilities include:
 
 Permission repair is limited to the intended destination and does not globally weaken Windows security.
 
+---
+
 ### Error Handling and Recovery
 
-ProfMig uses a structured error model for migration, validation and recovery behaviour.
+ProfMig uses a structured error model for migration, validation and recovery behavior.
 
 Errors can contain information such as:
 
@@ -294,14 +363,16 @@ Errors can contain information such as:
 - Exception information
 - Critical status
 
-Supported recovery behaviour includes:
+Supported recovery behavior includes:
 
 - Continue
 - Retry
 - Skip
 - Stop
 
-This allows predictable handling of both recoverable file-level failures and critical migration conditions.
+This allows predictable handling of recoverable file-level failures and critical migration conditions.
+
+---
 
 ### Migration Verification
 
@@ -316,6 +387,8 @@ Optional hash verification provides content-level integrity validation using sup
 
 Verification results are included in structured migration results and reporting.
 
+---
+
 ### Logging
 
 ProfMig writes structured operational logs for migration and validation activity.
@@ -328,11 +401,13 @@ Logging supports severity levels including:
 - Critical
 - Success
 
-Sensitive credential-like values and Bearer tokens are redacted before diagnostic information is written to logs.
+Sensitive credential-like values and authentication tokens are redacted before diagnostic information is written to logs.
+
+---
 
 ### Reporting Engine
 
-The Reporting Engine consumes structured results produced by the migration components.
+The Reporting Engine consumes structured results produced by migration components.
 
 Migration reports can contain:
 
@@ -359,9 +434,9 @@ Migration reports can contain:
 
 Sensitive diagnostic values are protected before reports are written.
 
-Reports are stored in the configured `Reports` directory.
-
 The underlying migration data remains structured for future GUI, automation and machine-readable reporting functionality.
+
+---
 
 ## Project structure
 
@@ -373,6 +448,9 @@ ProfMig/
 │   ├── Config.psd1
 │   │
 │   ├── Applications/
+│   │   └── *.psd1
+│   │
+│   ├── Profiles/
 │   │   └── *.psd1
 │   │
 │   └── Modules/
@@ -393,18 +471,21 @@ ProfMig/
 │       ├── ProfMig.ProfileValidation.psm1
 │       ├── ProfMig.Permissions.psm1
 │       ├── ProfMig.ErrorHandling.psm1
-│       └── ProfMig.Verification.psm1
+│       ├── ProfMig.Verification.psm1
+│       └── ProfMig.Migration.psm1
+│
+├── build/
+│   ├── New-ProfMigPackage.ps1
+│   ├── Deploy-ProfMig.ps1
+│   ├── Uninstall-ProfMig.ps1
+│   │
+│   └── Intune/
+│       ├── New-ProfMigIntunePackage.ps1
+│       └── Detect-ProfMig.ps1
 │
 ├── assets/
 ├── docs/
 ├── tests/
-│   └── M3/
-│       ├── Automated/
-│       ├── Manual/
-│       ├── Invoke-M3Tests.ps1
-│       └── TestHelpers.psm1
-├── Logs/
-├── Reports/
 ├── Start-ProfMig.bat
 ├── README.md
 ├── LICENSE
@@ -413,13 +494,19 @@ ProfMig/
 └── SECURITY.md
 ```
 
-Generated log and report files are not stored in the Git repository.
+Generated packages, logs and reports are not stored in the Git repository.
+
+External build tools are also excluded from the repository.
+
+---
 
 ## Running ProfMig
 
-ProfMig currently runs on Windows with administrative privileges.
+ProfMig can be operated interactively or through supported command-line and silent workflows.
 
-From the project directory:
+### Interactive operation
+
+From the project or deployed ProfMig directory:
 
 ```powershell
 .\Start-ProfMig.bat
@@ -427,16 +514,189 @@ From the project directory:
 
 The interactive workflow allows the operator to:
 
-1. Select a source profile
-2. Select a destination profile
-3. Review detected profile information
-4. Select migration components
-5. Select supported applications
-6. Review migration configuration
-7. Validate the migration
-8. Start the migration
+1. Select a source profile.
+2. Select a destination profile.
+3. Review detected profile information.
+4. Select migration components.
+5. Select supported applications.
+6. Review migration configuration.
+7. Validate the migration.
+8. Start the migration.
 
 ProfMig displays the selected migration configuration before data is copied.
+
+---
+
+## Command-line and silent operation
+
+ProfMig includes migration orchestration designed to support non-interactive operation.
+
+The command-line framework can resolve migration profiles using supported profile identifiers such as:
+
+- SID
+- Profile path
+
+Migration configuration is validated before migration operations are started.
+
+Default profile-folder selections can include:
+
+- Desktop
+- Documents
+- Downloads
+- Pictures
+- Music
+- Videos
+- Favorites
+- Links
+
+Silent operation does not disable ProfMig's safety controls.
+
+Profile validation, storage validation, exclusions, permissions, error handling and verification remain applicable.
+
+For detailed command-line guidance, see:
+
+[`docs/Command-Line-and-Silent-Mode.md`](docs/Command-Line-and-Silent-Mode.md)
+
+---
+
+## Packaging
+
+ProfMig can be converted from the development repository into a deployable runtime package.
+
+The package builder is:
+
+```text
+build\New-ProfMigPackage.ps1
+```
+
+A normal runtime package contains only the files required to run ProfMig.
+
+Development-only content such as tests is not included in the deployed runtime.
+
+Runtime packages contain build metadata in:
+
+```text
+ProfMig.Build.psd1
+```
+
+Metadata includes information such as:
+
+- Application name
+- Version
+- Build
+- Git commit
+- Git working-tree state
+- Build timestamp
+
+For detailed packaging information, see:
+
+[`docs/Packaging-and-Application-Structure.md`](docs/Packaging-and-Application-Structure.md)
+
+---
+
+## Deployment and updates
+
+ProfMig includes deployment and uninstall scripts:
+
+```text
+build\Deploy-ProfMig.ps1
+build\Uninstall-ProfMig.ps1
+```
+
+The default deployment location is:
+
+```text
+C:\Program Files\ProfMig
+```
+
+Deployment supports:
+
+- Clean installation
+- Existing-installation detection
+- Version-aware deployment
+- Upgrade handling
+- Downgrade protection
+- Deployment staging
+- Validation before activation
+- Persistent-data preservation
+- Uninstall
+
+The deployment process is separate from the actual profile migration.
+
+Installing or updating ProfMig does not automatically start a migration.
+
+Persistent data currently includes:
+
+```text
+Logs
+Reports
+Backup
+```
+
+The standard uninstall process preserves these directories.
+
+For detailed deployment behavior, see:
+
+[`docs/Deployment-and-Update-Strategy.md`](docs/Deployment-and-Update-Strategy.md)
+
+---
+
+## Microsoft Intune deployment
+
+ProfMig can be packaged as a Microsoft Intune Win32 application.
+
+The Intune build process generates two version-linked artifacts.
+
+### Win32 package
+
+```text
+dist\Intune\Package\ProfMig-<version>.intunewin
+```
+
+Example:
+
+```text
+ProfMig-0.2.0.intunewin
+```
+
+### Detection script
+
+```text
+dist\Intune\Detection\Detect-ProfMig-<version>.ps1
+```
+
+Example:
+
+```text
+Detect-ProfMig-0.2.0.ps1
+```
+
+The version-specific detection script verifies the installed runtime using:
+
+```text
+C:\Program Files\ProfMig\ProfMig.Build.psd1
+```
+
+The Intune deployment lifecycle has been validated using the Windows SYSTEM security context for:
+
+- Runtime installation
+- Exact version detection
+- Incorrect-version rejection
+- Runtime uninstall
+- Persistent-data preservation
+- Detection after uninstall
+
+Runtime deployment through Intune and actual profile migration are intentionally separate operations.
+
+SYSTEM has been validated as a deployment context. This does not imply that SYSTEM is automatically the correct execution context for an actual user profile migration.
+
+Profile migration continues to require its own source, destination, privilege, storage, permissions and security validation.
+
+For complete Intune packaging and configuration guidance, see:
+
+[`docs/Microsoft-Intune-Deployment.md`](docs/Microsoft-Intune-Deployment.md)
+
+---
 
 ## Configuration
 
@@ -461,7 +721,40 @@ Configuration includes settings such as:
 - Verification level
 - Verification hash algorithm
 
-Runtime paths are resolved relative to the ProfMig project directory where appropriate.
+Runtime paths are resolved relative to the ProfMig runtime where appropriate.
+
+---
+
+## Versioning
+
+ProfMig uses application version information from:
+
+```text
+src\Config.psd1
+```
+
+Runtime builds generate:
+
+```text
+ProfMig.Build.psd1
+```
+
+The generated metadata is used for:
+
+- Runtime identification
+- Deployment validation
+- Installed-version detection
+- Upgrade decisions
+- Downgrade protection
+- Intune detection
+
+The same application version is used when generating the Intune Win32 package and corresponding detection artifact.
+
+For additional information, see:
+
+[`docs/Versioning-and-Build-Information.md`](docs/Versioning-and-Build-Information.md)
+
+---
 
 ## Safety principles
 
@@ -476,7 +769,7 @@ Current controls include:
 - A configurable storage safety margin is applied
 - Existing destination files are not overwritten
 - Missing source folders do not stop the complete migration unnecessarily
-- Locked files use bounded retry behaviour
+- Locked files use bounded retry behavior
 - File-access failures are classified and recorded
 - Failed copy operations are not reported as successfully migrated
 - Skipped files remain visible in migration results
@@ -493,20 +786,27 @@ Current controls include:
 - Windows source access controls are respected
 - Source data and source ACLs remain unchanged during migration
 - Critical errors can stop unsafe migration
-- Recoverable failures can use controlled retry, skip or continue behaviour
+- Recoverable failures can use controlled retry, skip or continue behavior
 - Migrated files can be verified after copy
 - Optional cryptographic hash verification can detect content differences
 - Reporting does not perform migration operations
 - Reporting failures do not destroy existing migration results
 - Sensitive credential-like values are redacted from logs and reports
 - Security failures remain visible in migration results and reports
+- Deployment does not automatically initiate migration
+- Endpoint deployment does not bypass migration validation
+- SYSTEM ownership of a destination user profile is never assumed
 - ProfMig does not rely on globally weakening Windows security controls
 
-These controls form the Milestone 3 reliability and security baseline for future ProfMig development.
+These controls form the reliability and security baseline for future ProfMig development.
+
+---
 
 ## Testing
 
-ProfMig includes reusable regression testing for the Milestone 3 reliability and security baseline.
+ProfMig contains automated and manual tests covering migration, reliability, security, packaging, deployment and automation functionality.
+
+### Milestone 3 regression suite
 
 The automated M3 regression suite contains **47 Pester tests** covering:
 
@@ -517,17 +817,17 @@ The automated M3 regression suite contains **47 Pester tests** covering:
 - Permissions and ACLs
 - Recovery and error handling
 - Migration verification
-- Security behaviour
+- Security behavior
 - Logging
 - Reporting
 
-Run the complete automated M3 regression suite from the repository root:
+Run the complete M3 regression suite from the repository root:
 
 ```powershell
 & '.\tests\M3\Invoke-M3Tests.ps1'
 ```
 
-The current regression baseline is:
+Current M3 automated baseline:
 
 ```text
 Total        : 47
@@ -540,27 +840,65 @@ Inconclusive : 0
 M3 AUTOMATED REGRESSION: PASS
 ```
 
-Two scenarios retain a manual or hybrid component because they depend on the actual Windows execution or machine context:
+Two M3 scenarios retain a manual or hybrid component because they depend on the actual Windows execution or machine context:
 
 - Non-elevated ProfMig execution
 - Verification that ProfMig does not globally weaken Windows security controls
 
-These procedures are documented in `tests\M3\Manual\M3-Manual-Tests.md`.
+These procedures are documented in:
 
-The automated regression suite complements the formal Milestone 3 validation. It does not replace the **51 formal M3 validation scenarios**, all of which passed during Milestone 3 acceptance testing.
+```text
+tests\M3\Manual\M3-Manual-Tests.md
+```
+
+The automated regression suite complements the formal Milestone 3 validation and does not replace the **51 formal M3 validation scenarios**, all of which passed during Milestone 3 acceptance testing.
+
+Detailed M3 validation evidence is documented in:
+
+[`docs/M3-Security-Reliability-Test-Plan.md`](docs/M3-Security-Reliability-Test-Plan.md)
+
+### Deployment tests
+
+Additional tests validate capabilities including:
+
+- Runtime packaging
+- Version metadata
+- Deployment
+- Uninstall
+- Version handling
+- Command-line operation
+- Intune detection
+
+Relevant tests include:
+
+```text
+tests\Test-ProfMigDeployment.ps1
+tests\Test-ProfMigUninstall.ps1
+tests\Test-ProfMigVersioning.ps1
+tests\Test-ProfMigCommandLine.ps1
+tests\Test-ProfMigIntuneDetection.ps1
+```
+
+---
 
 ## Requirements
 
-Current requirements:
+Current runtime requirements:
 
 - Windows 10 or Windows 11
 - Windows Server 2019 or later where applicable
 - Windows PowerShell 5.1
-- Local administrative privileges
+- Local administrative privileges where required by the operation
 
 ProfMig is primarily developed and validated using Windows PowerShell 5.1.
 
 The current M3 regression suite is compatible with Pester 3.4.
+
+Microsoft Intune deployment additionally requires a supported Intune Win32 application environment and the Intune Management Extension on the managed endpoint.
+
+The Microsoft Win32 Content Prep Tool is required only on the build workstation when generating `.intunewin` packages. It is not part of the ProfMig endpoint runtime.
+
+---
 
 ## Roadmap
 
@@ -577,6 +915,8 @@ Core functionality:
 - [x] Windows profile inventory
 - [x] Core profile Copy Engine
 - [x] Migration Reporting Engine
+
+---
 
 ### M2 – Application Migration
 
@@ -595,6 +935,8 @@ Application migration functionality:
 
 M2 was validated using separate Windows source and destination profiles.
 
+---
+
 ### M3 – Reliability & Security
 
 **Status: Completed and approved**
@@ -609,7 +951,7 @@ Completed functionality includes:
 - [x] File-access and locked-file handling
 - [x] Destination permissions and ACL handling
 - [x] Structured error handling
-- [x] Recovery behaviour
+- [x] Recovery behavior
 - [x] Migration verification
 - [x] Optional hash-based integrity verification
 - [x] Security validation
@@ -635,46 +977,136 @@ M3 status: APPROVED
 
 The post-validation automated regression baseline is **47/47 PASS**.
 
-Detailed validation evidence is documented in `docs/M3-Security-Reliability-Test-Plan.md`.
+---
+
+### M5 – Deployment & Operations
+
+**Status: In development**
+
+Current M5 capabilities include:
+
+- [x] Runtime packaging
+- [x] Application structure for deployment
+- [x] Command-line operation
+- [x] Silent and non-interactive operation
+- [x] Migration profile configuration
+- [x] Version and build metadata
+- [x] Controlled deployment
+- [x] Runtime uninstall
+- [x] Persistent-data preservation
+- [x] Version-aware deployment
+- [x] Downgrade protection
+- [x] Microsoft Intune source packaging
+- [x] Microsoft Intune Win32 package generation
+- [x] Version-specific Intune detection
+- [x] SYSTEM-context runtime installation
+- [x] SYSTEM-context runtime detection
+- [x] SYSTEM-context runtime uninstall
+- [ ] Final Intune upgrade validation
+- [ ] Migration execution-context validation
+- [ ] Final M5 deployment acceptance
+
+---
 
 ## Future direction
 
-The modular architecture and M3 reliability baseline are intended to support future functionality such as:
+The modular architecture and reliability baseline are intended to support further functionality such as:
 
 - Additional Windows profile components
 - Additional application definitions
 - Additional browser migration capabilities
 - Outlook migration enhancements
 - OneDrive migration
-- Backup and rollback capabilities
-- GUI operation
-- Silent execution
+- Extended backup and rollback capabilities
+- Graphical user interface
 - Machine-readable reports
-- Automation
-- Intune integration
-- Endpoint-management integration
+- Additional endpoint-management integration
 - Centralized reporting
-- Additional automated testing and release validation
+- Expanded automated deployment testing
+- Additional release validation
 
 These items represent project direction and should not be considered implemented until their corresponding development work has been completed.
+
+---
+
+## Deployment model
+
+A key ProfMig design principle is the separation between application deployment and migration execution.
+
+```text
+Endpoint management
+       |
+       v
+Install / update ProfMig runtime
+       |
+       v
+Detect installed version
+       |
+       v
+ProfMig available on endpoint
+       |
+       +--------------------------+
+                                  |
+                                  v
+                     Controlled migration request
+                                  |
+                                  v
+                       Migration validation
+                                  |
+                                  v
+                         Profile migration
+                                  |
+                                  v
+                      Verification & reporting
+```
+
+Installing ProfMig does not itself authorize or initiate a profile migration.
+
+This makes it possible to stage ProfMig on managed endpoints before a migration is scheduled.
+
+---
+
+## Documentation
+
+Additional technical documentation is available in the `docs` directory.
+
+Key documents include:
+
+- [Packaging and Application Structure](docs/Packaging-and-Application-Structure.md)
+- [Command-Line and Silent Mode](docs/Command-Line-and-Silent-Mode.md)
+- [Deployment and Update Strategy](docs/Deployment-and-Update-Strategy.md)
+- [Microsoft Intune Deployment](docs/Microsoft-Intune-Deployment.md)
+- [Versioning and Build Information](docs/Versioning-and-Build-Information.md)
+- [Error Handling and Recovery](docs/Error-Handling-and-Recovery.md)
+- [M3 Security and Reliability Test Plan](docs/M3-Security-Reliability-Test-Plan.md)
+
+---
 
 ## Contributing
 
 Contributions are welcome.
 
-See `CONTRIBUTING.md` for contribution guidelines.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for contribution guidelines.
+
+---
 
 ## Security
 
-Security issues should be reported according to the process described in `SECURITY.md`.
+Security issues should be reported according to the process described in [`SECURITY.md`](SECURITY.md).
 
 ProfMig intentionally avoids migrating known credentials, authentication tokens and other security-sensitive application state where this data cannot be migrated safely.
+
+Security and migration validation must remain active regardless of whether ProfMig is started interactively, silently or through an endpoint-management workflow.
+
+---
 
 ## License
 
 ProfMig is licensed under the MIT License.
 
-See `LICENSE` for details.
+See [`LICENSE`](LICENSE) for details.
+
+---
 
 ## Maintainers
 
