@@ -172,8 +172,6 @@ function Write-Log {
             -Value $Line
     }
 }
-
-
 # ---------------------------------------------------------------------------
 # Convenience logging functions
 # ---------------------------------------------------------------------------
@@ -188,7 +186,6 @@ function Write-Info {
         -Level 'INFO' `
         -Message $Message
 }
-
 
 function Write-Success {
 

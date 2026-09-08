@@ -46,6 +46,7 @@ function Show-Header {
     Write-Host ''
     Write-Host '==============================================' -ForegroundColor Cyan
     Write-Host '                    ProfMig' -ForegroundColor White
+    Write-Host '             Powered by Infinigate' -ForegroundColor DarkGray
     Write-Host '==============================================' -ForegroundColor Cyan
     Write-Host ''
 
@@ -1327,7 +1328,8 @@ function Start-ProfMigMenu {
                         $reportResult = ConvertTo-ProfMigMigrationResult `
                             -CopyResult $copyResult `
                             -ApplicationMigrationResult $applicationMigrationResult `
-                            -ProfMigVersion $Configuration.Application.Version
+                            -ProfMigVersion $Configuration.Application.Version `
+                            -ProfMigBuild $Configuration.Application.Build
 
                         $reportPath = New-ProfMigMigrationReport `
                             -MigrationResult $reportResult `

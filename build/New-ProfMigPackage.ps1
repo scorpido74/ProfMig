@@ -24,28 +24,76 @@ $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SourceRoot     = Join-Path $RepositoryRoot 'src'
 $PackageRoot    = [System.IO.Path]::GetFullPath($OutputPath)
 
-Write-Host 'Creating ProfMig runtime package...'
-Write-Host "Repository: $RepositoryRoot"
-Write-Host "Package:    $PackageRoot"
-
 # -----------------------------------------------------------------------------
-# Validate required runtime source files
+# Resolve build information
 # -----------------------------------------------------------------------------
 
-$RequiredPaths = @(
-    (Join-Path $RepositoryRoot 'Start-ProfMig.bat')
-    (Join-Path $RepositoryRoot 'LICENSE')
-    (Join-Path $SourceRoot 'ProfMig.ps1')
-    (Join-Path $SourceRoot 'Config.psd1')
-    (Join-Path $SourceRoot 'Modules')
-    (Join-Path $SourceRoot 'Applications')
-)
+    $ConfigurationPath = Join-Path $SourceRoot 'Config.psd1'
+    $Configuration     = Import-PowerShellDataFile -LiteralPath $ConfigurationPath
 
-foreach ($Path in $RequiredPaths) {
-    if (-not (Test-Path -LiteralPath $Path)) {
-        throw "Required runtime component was not found: $Path"
+    $ProfMigVersion = [string]$Configuration.Application.Version
+    $ProfMigBuild   = [string]$Configuration.Application.Build
+
+    if ([string]::IsNullOrWhiteSpace($ProfMigVersion)) {
+        throw 'ProfMig version is missing from Config.psd1.'
     }
-}
+
+    if ([string]::IsNullOrWhiteSpace($ProfMigBuild)) {
+        throw 'ProfMig build identifier is missing from Config.psd1.'
+    }
+
+    $GitCommit = 'Unknown'
+    $GitDirty  = $null
+
+    try {
+        $ResolvedGitCommit = (
+            git -C $RepositoryRoot rev-parse HEAD 2>$null
+        )
+
+        if (-not [string]::IsNullOrWhiteSpace($ResolvedGitCommit)) {
+            $GitCommit = [string]$ResolvedGitCommit.Trim()
+        }
+
+        $GitStatus = @(
+            git -C $RepositoryRoot status --porcelain 2>$null
+        )
+
+        $GitDirty = ($GitStatus.Count -gt 0)
+    }
+    catch {
+        # Package creation remains possible when Git is unavailable.
+        $GitCommit = 'Unknown'
+        $GitDirty  = $null
+    }
+
+    $BuildTimestamp = (Get-Date).ToUniversalTime().ToString('o')
+
+    Write-Host 'Creating ProfMig runtime package...'
+    Write-Host "Repository: $RepositoryRoot"
+    Write-Host "Package:    $PackageRoot"
+    Write-Host "Version:    $ProfMigVersion"
+    Write-Host "Build:      $ProfMigBuild"
+    Write-Host "Git commit: $GitCommit"
+    Write-Host "Git dirty:  $GitDirty"
+
+    # -----------------------------------------------------------------------------
+    # Validate required runtime source files
+    # -----------------------------------------------------------------------------
+
+    $RequiredPaths = @(
+        (Join-Path $RepositoryRoot 'Start-ProfMig.bat')
+        (Join-Path $RepositoryRoot 'LICENSE')
+        (Join-Path $SourceRoot 'ProfMig.ps1')
+        (Join-Path $SourceRoot 'Config.psd1')
+        (Join-Path $SourceRoot 'Modules')
+        (Join-Path $SourceRoot 'Applications')
+    )
+
+    foreach ($Path in $RequiredPaths) {
+        if (-not (Test-Path -LiteralPath $Path)) {
+            throw "Required runtime component was not found: $Path"
+        }
+    }
 
 # -----------------------------------------------------------------------------
 # Ensure the output directory cannot resolve to a source directory
@@ -110,12 +158,35 @@ Copy-Item `
     -Recurse
 
 # -----------------------------------------------------------------------------
+# Generate package build metadata
+# -----------------------------------------------------------------------------
+
+$BuildMetadataPath = Join-Path $PackageRoot 'ProfMig.Build.psd1'
+
+$BuildMetadata = @"
+@{
+    Name      = '$($Configuration.Application.Name)'
+    Version   = '$ProfMigVersion'
+    Build     = '$ProfMigBuild'
+    GitCommit = '$GitCommit'
+    GitDirty  = `$$GitDirty
+    BuiltAt   = '$BuildTimestamp'
+}
+"@
+
+Set-Content `
+    -LiteralPath $BuildMetadataPath `
+    -Value $BuildMetadata `
+    -Encoding UTF8
+
+# -----------------------------------------------------------------------------
 # Validate generated package
 # -----------------------------------------------------------------------------
 
 $PackageRequiredPaths = @(
     (Join-Path $PackageRoot 'Start-ProfMig.bat')
     (Join-Path $PackageRoot 'LICENSE')
+    (Join-Path $PackageRoot 'ProfMig.Build.psd1')
     (Join-Path $PackageSourceRoot 'ProfMig.ps1')
     (Join-Path $PackageSourceRoot 'Config.psd1')
     (Join-Path $PackageSourceRoot 'Modules')
