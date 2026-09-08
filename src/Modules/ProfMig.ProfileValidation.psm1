@@ -264,14 +264,14 @@ function Get-ProfMigWindowsProfile {
     }
 
     $results = @(
-        foreach ($profile in $profiles) {
+        foreach ($profileEntry in $profiles) {
 
-            if ([string]::IsNullOrWhiteSpace($profile.LocalPath)) {
+            if ([string]::IsNullOrWhiteSpace($profileEntry.LocalPath)) {
                 continue
             }
 
             try {
-                $localPath = Get-ProfMigCanonicalPath -Path $profile.LocalPath
+                $localPath = Get-ProfMigCanonicalPath -Path $profileEntry.LocalPath
             }
             catch {
                 continue
@@ -286,11 +286,11 @@ function Get-ProfMigWindowsProfile {
 
             [PSCustomObject]@{
                 PSTypeName = 'ProfMig.WindowsProfile'
-                SID        = [string]$profile.SID
+                SID        = [string]$profileEntry.SID
                 LocalPath  = $localPath
-                Loaded     = [bool]$profile.Loaded
-                Special    = [bool]$profile.Special
-                Status     = $profile.Status
+                Loaded     = [bool]$profileEntry.Loaded
+                Special    = [bool]$profileEntry.Special
+                Status     = $profileEntry.Status
             }
         }
     )

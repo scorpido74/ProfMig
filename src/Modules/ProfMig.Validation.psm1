@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Central pre-migration validation engine for ProfMig.
 
@@ -546,8 +546,8 @@ function Get-ProfMigApplicationMigrationSize {
                     -SourceProfile $SourceProfile `
                     -DestinationProfile $DestinationProfile
 
-                foreach ($profile in @($plan.Profiles)) {
-                    foreach ($item in @($profile.MigrationItems)) {
+                foreach ($applicationProfile in @($plan.Profiles)) {
+                    foreach ($item in @($applicationProfile.MigrationItems)) {
                         if ($null -ne $item.Size) {
                             $applicationBytes += [Int64]$item.Size
                         }
@@ -568,9 +568,9 @@ function Get-ProfMigApplicationMigrationSize {
                 $plan = Get-ProfMigEdgeMigrationPlan `
                     -ProfilePath $SourceProfile
 
-                foreach ($profile in @($plan.Profiles)) {
+                foreach ($applicationProfile in @($plan.Profiles)) {
                     foreach ($item in @(
-                        $profile.Items |
+                        $applicationProfile.Items |
                             Where-Object {
                                 $_.Exists -and
                                 $_.Action -eq 'Migrate'

@@ -679,14 +679,14 @@ function Test-ProfMigChromeMigration {
     # Existing destination Chrome data must not be overwritten.
     #
     $destinationConflicts = @(
-        foreach ($profile in $plan.Profiles) {
+        foreach ($chromeProfile in $plan.Profiles) {
 
-            foreach ($item in $profile.MigrationItems) {
+            foreach ($item in $chromeProfile.MigrationItems) {
 
                 if (Test-Path -LiteralPath $item.DestinationPath) {
 
                     [PSCustomObject]@{
-                        Profile         = $profile.ProfileName
+                        Profile         = $chromeProfile.ProfileName
                         Item            = $item.Name
                         DestinationPath = $item.DestinationPath
                     }

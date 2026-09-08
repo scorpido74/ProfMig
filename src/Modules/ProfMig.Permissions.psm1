@@ -1,4 +1,4 @@
-﻿Set-StrictMode -Version Latest
+Set-StrictMode -Version Latest
 
 function Write-ProfMigPermissionLog {
     [CmdletBinding()]
@@ -71,7 +71,7 @@ function Get-ProfMigProfileSid {
             $ProfilePath
         ).TrimEnd('\')
 
-        $profile = Get-CimInstance `
+        $userProfile = Get-CimInstance `
             -ClassName Win32_UserProfile `
             -ErrorAction Stop |
             Where-Object {
@@ -80,7 +80,7 @@ function Get-ProfMigProfileSid {
             } |
             Select-Object -First 1
 
-        if ($null -eq $profile) {
+        if ($null -eq $userProfile) {
             return [PSCustomObject]@{
                 ProfilePath = $normalizedPath
                 Sid         = $null
@@ -92,7 +92,7 @@ function Get-ProfMigProfileSid {
 
         [PSCustomObject]@{
             ProfilePath = $normalizedPath
-            Sid         = $profile.SID
+            Sid         = $userProfile.SID
             Registered  = $true
             Success     = $true
             Error       = $null

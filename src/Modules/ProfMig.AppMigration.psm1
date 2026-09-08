@@ -287,7 +287,7 @@ function Get-ProfMigApplicationDefinition {
         Get-ProfMigApplicationDefinitions -Path $Path
     )
 
-    $matches = @(
+    $matchingDefinitions = @(
         $definitions |
             Where-Object {
                 $_.Valid -and
@@ -296,15 +296,15 @@ function Get-ProfMigApplicationDefinition {
             }
     )
 
-    if ($matches.Count -eq 0) {
+    if ($matchingDefinitions.Count -eq 0) {
         return $null
     }
 
-    if ($matches.Count -gt 1) {
+    if ($matchingDefinitions.Count -gt 1) {
         throw "Multiple application definitions found with Id '$Id'."
     }
 
-    return $matches[0]
+    return $matchingDefinitions[0]
 }
 
 # ---------------------------------------------------------------------------
