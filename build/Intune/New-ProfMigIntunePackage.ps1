@@ -127,6 +127,50 @@ if (
 
 $ProfMigVersion = [string]$Metadata.Version
 
+$DetectionOutputPath = Join-Path `
+    (Split-Path $ResolvedOutputPath -Parent) `
+    'Detection'
+
+if (Test-Path -LiteralPath $DetectionOutputPath) {
+    Remove-Item `
+        -LiteralPath $DetectionOutputPath `
+        -Recurse `
+        -Force
+}
+
+New-Item `
+    -ItemType Directory `
+    -Path $DetectionOutputPath `
+    -Force | Out-Null
+
+$DetectionFileName = 'Detect-ProfMig-{0}.ps1' -f $ProfMigVersion
+
+$GeneratedDetectionScript = Join-Path `
+    $DetectionOutputPath `
+    $DetectionFileName
+
+$DetectionTemplate = Get-Content `
+    -LiteralPath $DetectionScript `
+    -Raw
+
+$DetectionInvocation = @"
+`$ExpectedVersion = '$ProfMigVersion'
+
+& {
+$DetectionTemplate
+} -ExpectedVersion `$ExpectedVersion
+"@
+
+Set-Content `
+    -LiteralPath $GeneratedDetectionScript `
+    -Value $DetectionInvocation `
+    -Encoding UTF8
+
+Write-Host ''
+Write-Host 'Intune detection script created.'
+Write-Host "Detection: $GeneratedDetectionScript"
+Write-Host "Expected:  $ProfMigVersion"
+
 Write-Host ''
 Write-Host 'ProfMig Intune source package created successfully.'
 Write-Host "Version: $ProfMigVersion"
@@ -138,7 +182,7 @@ if ($SourceOnly) {
     Write-Host 'Source-only build requested.'
     Write-Host 'Skipping .intunewin creation.'
 
-    exit 0
+    return
 }
 
 if (
@@ -241,7 +285,7 @@ Write-Host (
 
 Write-Host ''
 Write-Host 'Intune detection script:'
-Write-Host $DetectionScript
+Write-Host $GeneratedDetectionScript
 
 Write-Host ''
 Write-Host 'Expected version:'
