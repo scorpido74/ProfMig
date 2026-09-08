@@ -184,6 +184,53 @@ function Invoke-TestDeployment {
     }
 }
 
+function Invoke-TestProfMig {
+
+    param (
+        [Parameter(Mandatory)]
+        [string]$InstallationPath,
+
+        [Parameter(Mandatory)]
+        [string[]]$Arguments
+    )
+
+    $ProfMigPath = Join-Path `
+        $InstallationPath `
+        'src\ProfMig.ps1'
+
+    $PowerShellArguments = @(
+        '-NoProfile'
+        '-ExecutionPolicy'
+        'Bypass'
+        '-File'
+        $ProfMigPath
+    )
+
+    $PowerShellArguments += $Arguments
+
+    $PreviousErrorActionPreference = $ErrorActionPreference
+
+    try {
+
+        $ErrorActionPreference = 'Continue'
+
+        $Output = @(
+            & powershell.exe @PowerShellArguments 2>&1
+        )
+
+        $ExitCode = $LASTEXITCODE
+    }
+    finally {
+
+        $ErrorActionPreference = $PreviousErrorActionPreference
+    }
+
+    return [pscustomobject]@{
+        ExitCode = $ExitCode
+        Output   = $Output
+        Text     = ($Output -join [Environment]::NewLine)
+    }
+}
 function New-TestPackage {
 
     param (
@@ -597,6 +644,86 @@ try {
             Test-NoDeploymentArtifacts `
                 -TargetPath $InstallRoot
         )
+
+        # -------------------------------------------------------------------------
+    # Test 8 - Deployed runtime
+    # -------------------------------------------------------------------------
+
+    Write-Host ''
+    Write-Host 'Test: deployed runtime'
+
+    $RuntimePackage = Join-Path `
+        $TestRoot `
+        'RuntimePackage'
+
+    $RuntimeInstall = Join-Path `
+        $TestRoot `
+        'RuntimeInstall'
+
+    New-TestPackage `
+        -DestinationPath $RuntimePackage
+
+    $RuntimePackageMetadata = Import-PowerShellDataFile `
+        -LiteralPath (
+            Join-Path $RuntimePackage 'ProfMig.Build.psd1'
+        )
+
+    $ExpectedRuntimeVersion = [string](
+        $RuntimePackageMetadata.Version
+    )
+
+    $Result = Invoke-TestDeployment `
+        -PackagePath $RuntimePackage `
+        -TargetPath $RuntimeInstall
+
+    if ($Result.ExitCode -ne 0) {
+        throw (
+            'Runtime test installation failed. ' +
+            $Result.Text
+        )
+    }
+
+    Write-TestResult `
+        -Name 'Deployed runtime contains Start-ProfMig.bat' `
+        -Passed (
+            Test-Path `
+                -LiteralPath (
+                    Join-Path $RuntimeInstall 'Start-ProfMig.bat'
+                ) `
+                -PathType Leaf
+        )
+
+    $VersionResult = Invoke-TestProfMig `
+        -InstallationPath $RuntimeInstall `
+        -Arguments @(
+            '-Version'
+        )
+
+    Write-TestResult `
+        -Name 'Deployed runtime version command exits successfully' `
+        -Passed ($VersionResult.ExitCode -eq 0) `
+        -Details $VersionResult.Text
+
+    Write-TestResult `
+        -Name 'Deployed runtime reports expected version' `
+        -Passed (
+            $VersionResult.Text -match (
+                'ProfMig\s+' +
+                [regex]::Escape($ExpectedRuntimeVersion)
+            )
+        ) `
+        -Details $VersionResult.Text
+
+    $SilentResult = Invoke-TestProfMig `
+        -InstallationPath $RuntimeInstall `
+        -Arguments @(
+            '-Silent'
+        )
+
+    Write-TestResult `
+        -Name 'Deployed silent mode returns expected validation exit code' `
+        -Passed ($SilentResult.ExitCode -eq 3) `
+        -Details $SilentResult.Text
 
     # -------------------------------------------------------------------------
     # Summary
