@@ -128,6 +128,54 @@ function Test-ProfMigConfigurationSchema {
     # format and must not cause an error.
 
     # ------------------------------------------------------------------------
+    # Application version
+    # ------------------------------------------------------------------------
+
+    if (
+        $Configuration.Contains('Application') -and
+        $null -ne $Configuration.Application -and
+        $Configuration.Application.Contains('Version')
+    ) {
+
+        $applicationVersion = [string]$Configuration.Application.Version
+
+        # ProfMig uses Semantic Versioning:
+        # MAJOR.MINOR.PATCH with an optional pre-release identifier.
+        #
+        # Examples:
+        #   1.0.0
+        #   1.0.0-alpha
+        #   1.0.0-beta
+        #   1.0.0-rc1
+        $semanticVersionPattern = (
+            '^(0|[1-9]\d*)\.' +
+            '(0|[1-9]\d*)\.' +
+            '(0|[1-9]\d*)' +
+            '(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$'
+        )
+
+        if (
+            [string]::IsNullOrWhiteSpace($applicationVersion) -or
+            $applicationVersion -notmatch $semanticVersionPattern
+        ) {
+
+            throw (
+                New-ProfMigException `
+                    -Message (
+                        'Invalid ProfMig application version: ' +
+                        $applicationVersion +
+                        '. Expected Semantic Versioning format ' +
+                        'MAJOR.MINOR.PATCH with an optional pre-release identifier.'
+                    ) `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'InvalidApplicationVersion'
+            )
+        }
+    }
+
+    # ------------------------------------------------------------------------
     # Verification
     # ------------------------------------------------------------------------
 

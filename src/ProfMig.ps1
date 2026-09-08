@@ -69,7 +69,10 @@ param (
     [string]$LogPath,
 
     [Parameter()]
-    [string]$ReportPath
+    [string]$ReportPath,
+
+    [Parameter()]
+    [switch]$Version
 )
 
 Set-StrictMode -Version Latest
@@ -121,7 +124,7 @@ try {
     # Validate command-line mode
     # -------------------------------------------------------------------------
 
-    if ($Silent) {
+    if ($Silent -and -not $Version) {
 
         $usingSid = (
             -not [string]::IsNullOrWhiteSpace($SourceSid) -or
@@ -221,6 +224,26 @@ try {
                 -RecoveryAction 'Stop' `
                 -Reason 'ConfigurationUnavailable'
         )
+    }
+
+
+    # -------------------------------------------------------------------------
+    # Display version information
+    # -------------------------------------------------------------------------
+
+    if ($Version) {
+
+        Write-Output (
+            'ProfMig ' +
+            [string]$Config.Application.Version
+        )
+
+        Write-Output (
+            'Build: ' +
+            [string]$Config.Application.Build
+        )
+
+        return
     }
 
 
@@ -363,6 +386,15 @@ try {
         -LogFolder $LogFolder |
         Out-Null
 
+        Write-Info (
+            'ProfMig version: ' +
+            [string]$Config.Application.Version
+        )
+
+        Write-Info (
+            'ProfMig build: ' +
+            [string]$Config.Application.Build
+        )
 
     # -------------------------------------------------------------------------
     # Validate environment

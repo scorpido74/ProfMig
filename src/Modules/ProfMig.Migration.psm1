@@ -392,7 +392,8 @@ function Invoke-ProfMigMigration {
     $reportResult = ConvertTo-ProfMigMigrationResult `
         -CopyResult $copyResult `
         -ApplicationMigrationResult $applicationMigrationResult `
-        -ProfMigVersion $Configuration.Application.Version
+        -ProfMigVersion $Configuration.Application.Version `
+        -ProfMigBuild $Configuration.Application.Build
 
     $reportPath = New-ProfMigMigrationReport `
         -MigrationResult $reportResult `

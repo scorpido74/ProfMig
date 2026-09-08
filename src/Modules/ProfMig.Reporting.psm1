@@ -460,7 +460,10 @@ function ConvertTo-ProfMigMigrationResult {
         [PSCustomObject]$ApplicationMigrationResult,
 
         [Parameter()]
-        [string]$ProfMigVersion = 'Unknown'
+        [string]$ProfMigVersion = 'Unknown',
+
+        [Parameter()]
+        [string]$ProfMigBuild = 'Unknown'
     )
 
 
@@ -962,6 +965,7 @@ function ConvertTo-ProfMigMigrationResult {
     return [PSCustomObject]@{
 
         ProfMigVersion      = $ProfMigVersion
+        ProfMigBuild        = $ProfMigBuild
 
         SourceProfile       = $CopyResult.SourceProfile
         DestinationProfile  = $CopyResult.DestinationProfile
@@ -1505,6 +1509,7 @@ ProfMig Migration Report
 ============================================================
 
 ProfMig version : $($MigrationResult.ProfMigVersion)
+ProfMig build   : $($MigrationResult.ProfMigBuild)
 
 Source      : $($MigrationResult.SourceProfile)
 Destination : $($MigrationResult.DestinationProfile)
