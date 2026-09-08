@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Builds a clean ProfMig runtime package in a temporary location and
-    validates the runtime structure, deployment script and package isolation
-    requirements.
+    validates the runtime structure, deployment script, uninstall script and
+    package isolation requirements.
 
     The test does not perform a profile migration.
 #>
@@ -25,6 +25,10 @@ $BuildScript = Join-Path `
 $DeploymentScript = Join-Path `
     $RepositoryRoot `
     'build\Deploy-ProfMig.ps1'
+
+$UninstallScript = Join-Path `
+    $RepositoryRoot `
+    'build\Uninstall-ProfMig.ps1'
 
 $TestRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
@@ -48,6 +52,10 @@ try {
         throw "Deployment script was not found: $DeploymentScript"
     }
 
+    if (-not (Test-Path -LiteralPath $UninstallScript -PathType Leaf)) {
+        throw "Uninstall script was not found: $UninstallScript"
+    }
+
     # -------------------------------------------------------------------------
     # Build package
     # -------------------------------------------------------------------------
@@ -60,6 +68,7 @@ try {
 
     $RequiredPaths = @(
         'Deploy-ProfMig.ps1'
+        'Uninstall-ProfMig.ps1'
         'Start-ProfMig.bat'
         'LICENSE'
         'ProfMig.Build.psd1'
@@ -91,16 +100,6 @@ try {
         $PackageRoot `
         'Deploy-ProfMig.ps1'
 
-    if (
-        -not (
-            Test-Path `
-                -LiteralPath $PackagedDeploymentScript `
-                -PathType Leaf
-        )
-    ) {
-        throw 'Packaged deployment script is missing.'
-    }
-
     $SourceDeploymentHash = (
         Get-FileHash `
             -LiteralPath $DeploymentScript `
@@ -118,6 +117,34 @@ try {
         throw (
             'Packaged deployment script does not match ' +
             'build\Deploy-ProfMig.ps1.'
+        )
+    }
+
+    # -------------------------------------------------------------------------
+    # Validate uninstall script
+    # -------------------------------------------------------------------------
+
+    $PackagedUninstallScript = Join-Path `
+        $PackageRoot `
+        'Uninstall-ProfMig.ps1'
+
+    $SourceUninstallHash = (
+        Get-FileHash `
+            -LiteralPath $UninstallScript `
+            -Algorithm SHA256
+    ).Hash
+
+    $PackagedUninstallHash = (
+        Get-FileHash `
+            -LiteralPath $PackagedUninstallScript `
+            -Algorithm SHA256
+    ).Hash
+
+    if ($SourceUninstallHash -ne $PackagedUninstallHash) {
+
+        throw (
+            'Packaged uninstall script does not match ' +
+            'build\Uninstall-ProfMig.ps1.'
         )
     }
 
@@ -339,6 +366,7 @@ try {
     Write-Host ''
     Write-Host 'PASS: ProfMig runtime package validation completed successfully.'
     Write-Host 'Deployment script validated:       Yes'
+    Write-Host 'Uninstall script validated:        Yes'
     Write-Host "Package version validated:         $($BuildMetadata.Version)"
     Write-Host "Modules validated:                 $($PackageModules.Count)"
     Write-Host "Application definitions validated: $($PackageApplications.Count)"

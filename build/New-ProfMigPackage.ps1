@@ -8,9 +8,9 @@
     Development files, tests, existing logs, reports and backup data are not
     included in the package.
 
-    The generated package contains the ProfMig deployment script and is
-    intended to be suitable for local execution and unattended deployment
-    through management platforms such as RMM.
+    The generated package contains the ProfMig deployment and uninstall
+    scripts and is intended to be suitable for local execution and unattended
+    deployment through management platforms such as RMM.
 #>
 
 [CmdletBinding()]
@@ -28,6 +28,10 @@ $PackageRoot = [System.IO.Path]::GetFullPath($OutputPath)
 $DeploymentScriptPath = Join-Path `
     $RepositoryRoot `
     'build\Deploy-ProfMig.ps1'
+
+$UninstallScriptPath = Join-Path `
+    $RepositoryRoot `
+    'build\Uninstall-ProfMig.ps1'
 
 # -----------------------------------------------------------------------------
 # Resolve build information
@@ -96,6 +100,7 @@ $RequiredPaths = @(
     (Join-Path $RepositoryRoot 'Start-ProfMig.bat')
     (Join-Path $RepositoryRoot 'LICENSE')
     $DeploymentScriptPath
+    $UninstallScriptPath
     (Join-Path $SourceRoot 'ProfMig.ps1')
     (Join-Path $SourceRoot 'Config.psd1')
     (Join-Path $SourceRoot 'Modules')
@@ -188,6 +193,10 @@ Copy-Item `
     -Destination (Join-Path $PackageRoot 'Deploy-ProfMig.ps1')
 
 Copy-Item `
+    -LiteralPath $UninstallScriptPath `
+    -Destination (Join-Path $PackageRoot 'Uninstall-ProfMig.ps1')
+
+Copy-Item `
     -LiteralPath (Join-Path $SourceRoot 'ProfMig.ps1') `
     -Destination $PackageSourceRoot
 
@@ -240,6 +249,7 @@ Set-Content `
 
 $PackageRequiredPaths = @(
     (Join-Path $PackageRoot 'Deploy-ProfMig.ps1')
+    (Join-Path $PackageRoot 'Uninstall-ProfMig.ps1')
     (Join-Path $PackageRoot 'Start-ProfMig.bat')
     (Join-Path $PackageRoot 'LICENSE')
     (Join-Path $PackageRoot 'ProfMig.Build.psd1')
@@ -355,4 +365,5 @@ Write-Host "Modules:                 $ModuleCount"
 Write-Host "Application definitions: $ApplicationDefinitionCount"
 Write-Host "Migration profiles:      $MigrationProfileCount"
 Write-Host 'Deployment script:       included'
+Write-Host 'Uninstall script:        included'
 Write-Host "Location:                $PackageRoot"

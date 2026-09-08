@@ -295,6 +295,46 @@ function Test-ProfMigPackage {
     }
 }
 
+function Test-ProfMigPreservedDataOnly {
+
+    param (
+        [Parameter(Mandatory)]
+        [string]$Path
+    )
+
+    if (
+        -not (
+            Test-Path `
+                -LiteralPath $Path `
+                -PathType Container
+        )
+    ) {
+        return $false
+    }
+
+    $Items = @(
+        Get-ChildItem `
+            -LiteralPath $Path `
+            -Force
+    )
+
+    if ($Items.Count -eq 0) {
+        return $true
+    }
+
+    foreach ($Item in $Items) {
+
+        if (-not $Item.PSIsContainer) {
+            return $false
+        }
+
+        if ($Item.Name -notin $PersistentDirectories) {
+            return $false
+        }
+    }
+
+    return $true
+}
 function Copy-ProfMigPackage {
 
     param (
@@ -465,6 +505,7 @@ try {
 
     $InstalledVersionText = $null
     $VersionComparison = $null
+    $PreservedDataOnly = $false
 
     if ($InstallationExists) {
 
@@ -476,11 +517,30 @@ try {
             )
         ) {
 
-            throw (
-                'An existing ProfMig installation was detected, ' +
-                'but ProfMig.Build.psd1 is missing.'
-            )
+            if (
+                Test-ProfMigPreservedDataOnly `
+                    -Path $InstallPath
+            ) {
+
+                $PreservedDataOnly = $true
+
+                Write-Host 'Installed version: none'
+                Write-Host (
+                    'Deployment type: clean reinstall with ' +
+                    'preserved runtime data'
+                )
+            }
+            else {
+
+                throw (
+                    'The installation directory exists but is not a ' +
+                    'recognized ProfMig installation or preserved-data ' +
+                    'directory.'
+                )
+            }
         }
+
+        if (-not $PreservedDataOnly) {
 
         $InstalledMetadata = Get-ProfMigPackageMetadata `
             -PackagePath $InstallPath
@@ -544,6 +604,7 @@ try {
             )
         }
     }
+}
     else {
 
         Write-Host 'Installed version: none'
