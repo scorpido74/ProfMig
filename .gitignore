@@ -31,3 +31,6 @@ TestData/
 
 # Generated runtime packages
 dist/
+
+# External build tools
+build/Tools/
