@@ -87,6 +87,7 @@ $PackageRoot    = [System.IO.Path]::GetFullPath($OutputPath)
         (Join-Path $SourceRoot 'Config.psd1')
         (Join-Path $SourceRoot 'Modules')
         (Join-Path $SourceRoot 'Applications')
+        (Join-Path $SourceRoot 'Profiles')
     )
 
     foreach ($Path in $RequiredPaths) {
@@ -157,6 +158,10 @@ Copy-Item `
     -Destination $PackageSourceRoot `
     -Recurse
 
+Copy-Item `
+    -LiteralPath (Join-Path $SourceRoot 'Profiles') `
+    -Destination $PackageSourceRoot `
+    -Recurse
 # -----------------------------------------------------------------------------
 # Generate package build metadata
 # -----------------------------------------------------------------------------
@@ -191,6 +196,7 @@ $PackageRequiredPaths = @(
     (Join-Path $PackageSourceRoot 'Config.psd1')
     (Join-Path $PackageSourceRoot 'Modules')
     (Join-Path $PackageSourceRoot 'Applications')
+    (Join-Path $PackageSourceRoot 'Profiles')
     (Join-Path $PackageRoot 'Logs')
     (Join-Path $PackageRoot 'Reports')
 )
@@ -263,6 +269,13 @@ $ApplicationDefinitionCount = @(
         -File
 ).Count
 
+$MigrationProfileCount = @(
+    Get-ChildItem `
+        -LiteralPath (Join-Path $PackageSourceRoot 'Profiles') `
+        -Filter '*.psd1' `
+        -File
+).Count
+
 $PackageFileCount = @(
     Get-ChildItem `
         -LiteralPath $PackageRoot `
@@ -275,4 +288,5 @@ Write-Host 'ProfMig runtime package created successfully.'
 Write-Host "Files:                   $PackageFileCount"
 Write-Host "Modules:                 $ModuleCount"
 Write-Host "Application definitions: $ApplicationDefinitionCount"
+Write-Host "Migration profiles:      $MigrationProfileCount"
 Write-Host "Location:                $PackageRoot"

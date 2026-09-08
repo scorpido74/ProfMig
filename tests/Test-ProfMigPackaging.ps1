@@ -51,6 +51,7 @@ try {
         'src\Config.psd1'
         'src\Modules'
         'src\Applications'
+        'src\Profiles'
         'Logs'
         'Reports'
     )
@@ -128,6 +129,44 @@ try {
     }
 
     # -------------------------------------------------------------------------
+    # Validate migration profiles
+    # -------------------------------------------------------------------------
+
+    $SourceProfiles = @(
+        Get-ChildItem `
+            -LiteralPath (Join-Path $RepositoryRoot 'src\Profiles') `
+            -Filter '*.psd1' `
+            -File
+    )
+
+    $PackageProfiles = @(
+        Get-ChildItem `
+            -LiteralPath (Join-Path $PackageRoot 'src\Profiles') `
+            -Filter '*.psd1' `
+            -File
+    )
+
+    if ($PackageProfiles.Count -ne $SourceProfiles.Count) {
+        throw (
+            'Migration profile count mismatch. Source: ' +
+            $SourceProfiles.Count +
+            ', Package: ' +
+            $PackageProfiles.Count
+        )
+    }
+
+    foreach ($SourceProfile in $SourceProfiles) {
+
+        $PackagedProfile = Join-Path `
+            (Join-Path $PackageRoot 'src\Profiles') `
+            $SourceProfile.Name
+
+        if (-not (Test-Path -LiteralPath $PackagedProfile -PathType Leaf)) {
+            throw "Migration profile is missing: $($SourceProfile.Name)"
+        }
+    }
+
+    # -------------------------------------------------------------------------
     # Validate empty runtime output directories
     # -------------------------------------------------------------------------
 
@@ -187,6 +226,7 @@ try {
     Write-Host 'PASS: ProfMig runtime package validation completed successfully.'
     Write-Host "Modules validated:                 $($PackageModules.Count)"
     Write-Host "Application definitions validated: $($PackageApplications.Count)"
+    Write-Host "Migration profiles validated:      $($PackageProfiles.Count)"
 
     exit 0
 }
