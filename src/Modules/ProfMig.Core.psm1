@@ -61,6 +61,7 @@ function Show-ProfMigBanner {
     Write-Host "                               |___/ "
     Write-Host ""
     Write-Host " Professional Windows Profile Migration Toolkit"
+    Write-Host " Powered by Infinigate" -ForegroundColor DarkGray
     Write-Host ""
     Write-Host " Version : $($Script:ProfMig.Version)"
     Write-Host " Build   : $($Script:ProfMig.Build)"
