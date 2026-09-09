@@ -23,7 +23,7 @@ ProfMig is a PowerShell-based Windows profile migration toolkit designed to migr
 
 The project uses a modular architecture that separates profile discovery, validation, migration, application handling, exclusions, permissions, error handling, verification, logging, reporting and deployment.
 
-ProfMig supports interactive migration workflows as well as packaged runtime deployment, command-line operation, silent execution and Microsoft Intune Win32 deployment.
+ProfMig supports interactive migration workflows, command-line and silent operation, packaged runtime deployment and Microsoft Intune Win32 deployment.
 
 ---
 
@@ -33,7 +33,7 @@ ProfMig supports interactive migration workflows as well as packaged runtime dep
 
 Milestone 3 established and formally validated the ProfMig reliability and security baseline.
 
-The formal Milestone 3 validation completed:
+Formal Milestone 3 validation completed:
 
 ```text
 Tests executed : 51
@@ -47,7 +47,9 @@ Open High defects     : 0
 M3 status: APPROVED
 ```
 
-A reusable Milestone 3 regression suite is also available. The automated baseline contains:
+A reusable Milestone 3 regression suite is also available.
+
+Current automated baseline:
 
 ```text
 Total        : 47
@@ -60,7 +62,7 @@ Inconclusive : 0
 M3 AUTOMATED REGRESSION: PASS
 ```
 
-Development has since progressed into packaging, automation and endpoint deployment capabilities.
+Development has since progressed into packaging, automation and endpoint deployment.
 
 Current functionality includes:
 
@@ -92,7 +94,11 @@ Current functionality includes:
 - Runtime uninstall
 - Microsoft Intune Win32 packaging
 - Version-specific Intune detection
-- SYSTEM-context runtime deployment
+- SYSTEM-context runtime installation
+- SYSTEM-context runtime detection
+- SYSTEM-context runtime upgrade
+- SYSTEM-context runtime uninstall
+- Persistent-data preservation during runtime upgrade
 
 ---
 
@@ -677,20 +683,55 @@ The version-specific detection script verifies the installed runtime using:
 C:\Program Files\ProfMig\ProfMig.Build.psd1
 ```
 
-The Intune deployment lifecycle has been validated using the Windows SYSTEM security context for:
+The Sprint 5.5 Intune deployment lifecycle has been validated using the Windows SYSTEM security context for:
 
 - Runtime installation
 - Exact version detection
 - Incorrect-version rejection
 - Runtime uninstall
-- Persistent-data preservation
+- Persistent-data preservation after uninstall
 - Detection after uninstall
+- Runtime upgrade from 0.1.0 to 0.2.0
+- Persistent-data preservation during upgrade
+- Replacement of previous runtime content during upgrade
 
-Runtime deployment through Intune and actual profile migration are intentionally separate operations.
+The validated SYSTEM upgrade path was:
 
-SYSTEM has been validated as a deployment context. This does not imply that SYSTEM is automatically the correct execution context for an actual user profile migration.
+```text
+ProfMig 0.1.0
+      |
+      v
+NT AUTHORITY\SYSTEM
+      |
+      v
+Deploy-ProfMig.ps1
+      |
+      v
+ProfMig 0.2.0
+```
 
-Profile migration continues to require its own source, destination, privilege, storage, permissions and security validation.
+The upgrade completed successfully and preserved the designated `Logs`, `Reports` and `Backup` data while replacing the previous runtime.
+
+Runtime deployment through Intune and actual profile migration remain intentionally separate operations.
+
+SYSTEM has also been validated as an execution context for unattended silent profile migration.
+
+The validated migration used dedicated test profiles and the `Minimal` migration profile. No privilege, storage, permission, verification or other migration validation was bypassed.
+
+The SYSTEM-context migration confirmed:
+
+- Source and destination profiles were resolved correctly.
+- Pre-migration validation completed successfully.
+- Destination ACL validation reported `DestinationAccess=True`.
+- Desktop and Documents data were migrated.
+- Copied test files matched the source using SHA256.
+- The copied files were owned by `NT AUTHORITY\SYSTEM`.
+- The destination user retained inherited `FullControl`.
+- No verification failures occurred.
+
+SYSTEM support for migration does not remove ProfMig's normal safety controls. Every migration must still pass the configured source, destination, privilege, storage, permissions and verification checks.
+
+Runtime deployment and actual profile migration remain separate operations. Installing or upgrading ProfMig never automatically starts a profile migration.
 
 For complete Intune packaging and configuration guidance, see:
 
@@ -879,6 +920,28 @@ tests\Test-ProfMigCommandLine.ps1
 tests\Test-ProfMigIntuneDetection.ps1
 ```
 
+Sprint 5.5 also includes manual SYSTEM-context lifecycle validation covering:
+
+```text
+Install
+  |
+Detect
+  |
+Uninstall
+  |
+Install controlled 0.1.0 baseline
+  |
+Upgrade to 0.2.0
+  |
+Validate persistent data
+  |
+Validate runtime replacement
+```
+
+The complete evidence and procedure are documented in:
+
+[`docs/Microsoft-Intune-Deployment.md`](docs/Microsoft-Intune-Deployment.md)
+
 ---
 
 ## Requirements
@@ -1002,9 +1065,22 @@ Current M5 capabilities include:
 - [x] SYSTEM-context runtime installation
 - [x] SYSTEM-context runtime detection
 - [x] SYSTEM-context runtime uninstall
-- [ ] Final Intune upgrade validation
-- [ ] Migration execution-context validation
+- [x] SYSTEM-context runtime upgrade
+- [x] Persistent-data preservation during SYSTEM upgrade
+- [x] Runtime replacement validation during SYSTEM upgrade
+- [x] Final Intune upgrade validation
+- [x] Migration execution-context validation
 - [ ] Final M5 deployment acceptance
+
+The validated upgrade path for Sprint 5.5 is:
+
+```text
+0.1.0 -> 0.2.0
+```
+
+The upgrade was executed under `NT AUTHORITY\SYSTEM` and completed successfully while preserving `Logs`, `Reports` and `Backup`.
+
+Actual profile migration remains intentionally separate from runtime deployment. SYSTEM has been validated as a supported unattended migration context, while ProfMig continues to enforce its normal migration validation and security controls.
 
 ---
 
@@ -1057,12 +1133,14 @@ ProfMig available on endpoint
                          Profile migration
                                   |
                                   v
-                      Verification & reporting
+                     Verification & reporting
 ```
 
 Installing ProfMig does not itself authorize or initiate a profile migration.
 
 This makes it possible to stage ProfMig on managed endpoints before a migration is scheduled.
+
+SYSTEM has been validated for both runtime deployment operations and unattended silent migration. These remain separate operational workflows and retain their own validation and result handling.
 
 ---
 

@@ -70,9 +70,11 @@ SYSTEM execution has been validated for:
 
 - installation;
 - version detection;
+- version upgrade;
+- persistent-data preservation during upgrade;
 - uninstall.
 
-This validation does **not** imply that the actual user profile migration should run as SYSTEM.
+SYSTEM has subsequently also been validated as an execution context for unattended silent profile migration. Runtime deployment and profile migration nevertheless remain separate operations, and all normal ProfMig migration validation remains mandatory.
 
 The migration execution context must be validated separately because access to source profiles, destination profiles, user-specific resources, encryption material, application data, and ACLs can depend on the execution identity.
 
@@ -344,7 +346,7 @@ Use:
 System
 ```
 
-SYSTEM execution has been validated during Sprint 5.5 for runtime deployment.
+SYSTEM execution has been validated during Sprint 5.5 for runtime installation, detection, upgrade, and uninstall.
 
 ### Device restart behavior
 
@@ -497,6 +499,62 @@ This prevents an incomplete package from immediately replacing a working ProfMig
 
 ---
 
+## Upgrade behavior
+
+ProfMig supports replacement of an existing runtime with a newer runtime.
+
+The deployment script determines the currently installed version using:
+
+```text
+C:\Program Files\ProfMig\ProfMig.Build.psd1
+```
+
+The package version is then compared with the installed version.
+
+The deployment process is designed to:
+
+1. Validate the new package.
+2. Detect the existing installation.
+3. Determine whether the deployment is an install, reinstall, upgrade, or downgrade.
+4. Stage the replacement runtime.
+5. Preserve the current installation for rollback.
+6. Activate the new runtime.
+7. Restore persistent data.
+8. Validate the resulting installation.
+
+During Sprint 5.5, a real SYSTEM-context upgrade was validated using:
+
+```text
+ProfMig 0.1.0
+      |
+      v
+NT AUTHORITY\SYSTEM
+      |
+      v
+Deploy-ProfMig.ps1
+      |
+      v
+ProfMig 0.2.0
+```
+
+The upgrade completed successfully with Windows Scheduled Task result:
+
+```text
+0
+```
+
+After the upgrade:
+
+- installed version metadata reported `0.2.0`;
+- Logs were preserved;
+- Reports were preserved;
+- Backup data was preserved;
+- runtime-only content from the previous installation was removed.
+
+This confirms that the deployment mechanism replaces the ProfMig runtime rather than simply copying new files over the previous installation.
+
+---
+
 ## Downgrade protection
 
 ProfMig deployment blocks a downgrade by default.
@@ -537,15 +595,20 @@ C:\Program Files\ProfMig\Reports
 C:\Program Files\ProfMig\Backup
 ```
 
-During a normal uninstall these directories are preserved.
+These directories are preserved during supported runtime replacement operations where applicable.
 
-Runtime files are removed while these directories remain available.
+During a normal uninstall, these directories are also preserved.
+
+Runtime files are removed or replaced while persistent data remains available.
 
 This behavior is intended to prevent diagnostic and migration information from being destroyed automatically during:
 
 - uninstall;
 - reinstall;
+- upgrade;
 - runtime replacement.
+
+Persistent-data preservation during an upgrade from 0.1.0 to 0.2.0 under SYSTEM was validated during Sprint 5.5.
 
 ---
 
@@ -661,6 +724,8 @@ NT AUTHORITY\SYSTEM
 
 - ProfMig installation;
 - version detection;
+- version upgrade;
+- persistent-data preservation during upgrade;
 - uninstall.
 
 The SYSTEM test environment reported:
@@ -695,6 +760,51 @@ ProfMig migration logic must continue to perform its existing validation and per
 
 No migration validation or security control may be bypassed because the application was installed through Intune.
 
+During Sprint 5.5, SYSTEM was also validated as an execution context for an actual unattended silent migration between dedicated test profiles.
+
+The migration was executed without using `-SkipPrivilegeCheck`, `-SkipDiskSpaceCheck`, or another validation bypass.
+
+The test confirmed:
+
+- successful source profile resolution;
+- successful destination profile resolution;
+- successful pre-migration validation;
+- successful migration of Desktop and Documents test data;
+- `DestinationAccess=True` during destination ACL validation;
+- inherited destination-user access remained valid;
+- copied test files matched their source using SHA256;
+- no verification failures occurred.
+
+The copied files were owned by:
+
+```text
+NT AUTHORITY\SYSTEM
+
+The destination user retained inherited:
+
+FullControl
+
+This demonstrates that SYSTEM is a supported unattended migration execution context for the validated scenario.
+
+It does not make migration validation optional. ProfMig must continue to validate the actual source profile, destination profile, privileges, storage, permissions, ACLs and verification requirements for every migration.
+
+
+### Exitcodes expliciet scheiden
+
+ProfMig uses different exit-code contracts for deployment, migration and Intune detection.
+
+These values must be interpreted in the context of the component that returned them. In particular, exit code `1` has a different meaning for runtime deployment and profile migration.
+
+| Component | Exit code 0 | Exit code 1 |
+|---|---|---|
+| `Deploy-ProfMig.ps1` | Success | General deployment failure |
+| `ProfMig.ps1 -Silent` | Success | Success with warnings |
+| Intune detection script | Expected version detected | Not detected or version mismatch |
+
+A management platform must therefore not apply the deployment exit-code interpretation to a separately executed profile migration.
+
+For silent migration, exit code `1` is a successful migration result with warnings and should be handled as such by the orchestration platform.
+
 ---
 
 ## Logging and reports
@@ -709,7 +819,7 @@ C:\Program Files\ProfMig\Reports
 C:\Program Files\ProfMig\Backup
 ```
 
-These directories are preserved by the standard uninstall process.
+These directories are preserved by the standard uninstall process and during validated runtime upgrades.
 
 Deployment through Intune must not introduce sensitive information into deployment output or logs.
 
@@ -721,7 +831,7 @@ Intune deployment should not weaken or bypass those controls.
 
 ## Validated Sprint 5.5 lifecycle
 
-During Sprint 5.5, the Intune deployment lifecycle was tested using a Windows Scheduled Task running as:
+During Sprint 5.5, the Intune deployment lifecycle was tested using Windows Scheduled Tasks running as:
 
 ```text
 NT AUTHORITY\SYSTEM
@@ -735,30 +845,40 @@ The following lifecycle was validated:
 Build Intune package
         |
         v
-Install under SYSTEM
-        |
-        | exit 0
-        v
-Detect installed 0.2.0
-        |
-        | exit 0
-        v
-Detect incorrect 0.3.0
-        |
-        | exit 1
-        v
-Uninstall under SYSTEM
-        |
-        | exit 0
-        v
-Preserve Logs / Reports / Backup
+Install ProfMig 0.2.0 as SYSTEM
         |
         v
-Detect 0.2.0 after uninstall
+Detect ProfMig 0.2.0
         |
-        | exit 1
         v
-Not installed
+Reject incorrect version 0.3.0
+        |
+        v
+Uninstall ProfMig as SYSTEM
+        |
+        v
+Verify Logs / Reports / Backup are preserved
+        |
+        v
+Verify ProfMig is no longer detected
+        |
+        v
+Install controlled 0.1.0 baseline as SYSTEM
+        |
+        v
+Create persistent-data test markers
+        |
+        v
+Upgrade 0.1.0 -> 0.2.0 as SYSTEM
+        |
+        v
+Verify installed version is 0.2.0
+        |
+        v
+Verify Logs / Reports / Backup are preserved
+        |
+        v
+Verify old runtime-only content is removed
 ```
 
 ### Validated results
@@ -774,21 +894,84 @@ Not installed
 | Detection without external parameters | PASS |
 | Incorrect version rejected | PASS |
 | SYSTEM uninstall | PASS |
-| Logs preserved | PASS |
-| Reports preserved | PASS |
-| Backup preserved | PASS |
-| Runtime removed | PASS |
+| Logs preserved after uninstall | PASS |
+| Reports preserved after uninstall | PASS |
+| Backup preserved after uninstall | PASS |
+| Runtime removed during uninstall | PASS |
 | Detection fails after uninstall | PASS |
+| SYSTEM installation of controlled 0.1.0 baseline | PASS |
+| SYSTEM upgrade from 0.1.0 to 0.2.0 | PASS |
+| Installed version after upgrade is 0.2.0 | PASS |
+| Logs preserved during upgrade | PASS |
+| Reports preserved during upgrade | PASS |
+| Backup preserved during upgrade | PASS |
+| Previous runtime-only content removed during upgrade | PASS |
+| Upgrade package built from clean Git state | PASS |
+| SYSTEM silent profile migration | PASS |
+| Pre-migration validation under SYSTEM | PASS |
+| Destination ACL validation under SYSTEM | PASS |
+| DestinationAccess=True | PASS |
+| SYSTEM migration SHA256 verification | PASS |
+| Destination user retained FullControl | PASS |
+| Migration validation bypass required | NO |
+
+### Upgrade validation details
+
+The upgrade validation used a controlled 0.1.0 deployment baseline followed by the clean 0.2.0 runtime package.
+
+The 0.2.0 upgrade package was built from Git commit:
+
+```text
+84c5b88817c71189f0dbdfd4a36a0420f23b2744
+```
+
+with:
+
+```text
+GitDirty = False
+```
+
+The upgrade was executed under:
+
+```text
+NT AUTHORITY\SYSTEM
+```
+
+and completed successfully with Windows Scheduled Task result:
+
+```text
+0
+```
+
+Before the upgrade, persistent test markers were created in:
+
+```text
+Logs
+Reports
+Backup
+```
+
+A separate runtime-only marker was created in the root of the 0.1.0 installation.
+
+After upgrading to 0.2.0:
+
+- all three persistent test markers remained present;
+- the installed metadata reported version `0.2.0`;
+- the runtime-only 0.1.0 marker was no longer present.
+
+This validates both persistent-data preservation and runtime replacement during the upgrade.
 
 ---
 
 ## Sprint 5.5 test package
 
-The package used during the validated lifecycle contained:
+The validated 0.2.0 runtime package contained:
 
 ```text
 Version: 0.2.0
 Build: Development
+GitCommit: 84c5b88817c71189f0dbdfd4a36a0420f23b2744
+GitDirty: False
 ```
 
 The generated Win32 package was:
@@ -803,45 +986,11 @@ The generated detection artifact was:
 Detect-ProfMig-0.2.0.ps1
 ```
 
-The functional tests were performed against this version.
+The functional deployment tests were performed against version 0.2.0.
 
-A development build can contain:
+The controlled 0.1.0 package used for the upgrade baseline was created specifically for upgrade validation.
 
-```text
-GitDirty = True
-```
-
-when it is generated while local changes are present.
-
-Final release artifacts should be rebuilt from the final committed source so the build metadata accurately represents the repository state.
-
----
-
-## Upgrade strategy
-
-Intune can deploy a newer ProfMig runtime over an existing installation.
-
-The deployment script determines the currently installed version using:
-
-```text
-C:\Program Files\ProfMig\ProfMig.Build.psd1
-```
-
-The new package version is compared with the installed version.
-
-The deployment process is designed to:
-
-1. Validate the new package.
-2. Detect the existing installation.
-3. Preserve persistent data.
-4. Stage the replacement runtime.
-5. Activate the new runtime.
-6. Validate the resulting installation.
-7. Retain rollback protection where applicable.
-
-The Intune detection script for the new release detects only the new expected version.
-
-This means that an endpoint with an older ProfMig version does not satisfy the detection rule for the newer application version.
+The final release artifacts should always be rebuilt from the final committed source so that their build metadata accurately represents the repository state.
 
 ---
 
@@ -870,7 +1019,11 @@ Detect-ProfMig-0.3.0.ps1
 
 The package and detection artifact should be treated as one release pair.
 
-Where Intune supersedence is used, the new ProfMig Win32 application can supersede the previous application after the upgrade path has been validated.
+The ProfMig deployment upgrade mechanism has been validated under SYSTEM during Sprint 5.5.
+
+Where Intune supersedence is used, the new ProfMig Win32 application can supersede the previous application.
+
+Intune supersedence configuration itself should still be validated in the target Intune environment before production rollout.
 
 ---
 
@@ -949,7 +1102,7 @@ This separation makes it possible to deploy ProfMig to endpoints in advance with
 
 ### ProfMig is not detected
 
-Verify:
+Verify that:
 
 ```text
 C:\Program Files\ProfMig\ProfMig.Build.psd1
@@ -1050,6 +1203,8 @@ Before publishing a ProfMig Intune release:
 - [ ] No security or validation control is bypassed.
 - [ ] Final package is rebuilt from committed source.
 
+The checklist is intended to be completed for each release. The completed Sprint 5.5 validation documented above does not remove the need to repeat the appropriate checks for future ProfMig versions.
+
 ---
 
 ## Related files
@@ -1097,6 +1252,11 @@ The following capabilities have been implemented and validated:
 - SYSTEM uninstall;
 - persistent data preservation;
 - version-aware deployment;
+- SYSTEM-context upgrade validation;
+- persistent-data preservation during SYSTEM upgrade;
+- runtime replacement during SYSTEM upgrade;
 - downgrade protection.
 
-Actual profile migration execution remains intentionally separate from runtime deployment and requires its own execution-context validation.
+Actual profile migration execution remains intentionally separate from runtime deployment.
+
+SYSTEM has been validated for unattended silent migration using dedicated test profiles. The validation confirmed successful pre-migration validation, copy execution, SHA256 verification and destination-user access without bypassing ProfMig security or migration controls.
