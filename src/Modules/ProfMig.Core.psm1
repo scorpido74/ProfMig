@@ -75,7 +75,7 @@ function Test-ProfMigEnvironment {
     [CmdletBinding()]
     param()
 
-    if ($PSVersionTable.PSVersion.Major -lt 5) {
+    if ($PSVersionTable.PSVersion -lt [Version]'5.1') {
 
         throw "PowerShell 5.1 or newer is required."
 
@@ -84,6 +84,12 @@ function Test-ProfMigEnvironment {
     if (-not ([Environment]::Is64BitOperatingSystem)) {
 
         throw "64-bit Windows is required."
+
+    }
+
+    if (-not ([Environment]::Is64BitProcess)) {
+
+        throw "ProfMig requires a 64-bit PowerShell process."
 
     }
 
