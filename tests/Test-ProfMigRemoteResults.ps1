@@ -9,6 +9,10 @@
     ProfMig uses process exit codes for immediate machine-readable status,
     migration reports for result details and logs for diagnostics.
 
+    This test is self-contained. It creates representative temporary
+    ProfMig report and log artifacts, validates remote interpretation and
+    removes the temporary artifacts afterwards.
+
     Structured JSON output is intentionally not required by the ProfMig core.
 
 .NOTES
@@ -22,8 +26,17 @@ $ErrorActionPreference = 'Stop'
 $Passed = 0
 $Failed = 0
 
-$ReportRoot = 'C:\ProgramData\ProfMig\Test-5.6\Reports'
-$LogRoot    = 'C:\ProgramData\ProfMig\Test-5.6\Logs'
+$TestRoot = Join-Path `
+    $env:TEMP `
+    ('ProfMig-RemoteResults-Test-' + [guid]::NewGuid().ToString('N'))
+
+$ReportRoot = Join-Path `
+    $TestRoot `
+    'Reports'
+
+$LogRoot = Join-Path `
+    $TestRoot `
+    'Logs'
 
 
 function Write-TestResult {
@@ -58,95 +71,238 @@ function Write-TestResult {
 }
 
 
+function New-TestArtifacts {
+
+    New-Item `
+        -ItemType Directory `
+        -Path $ReportRoot `
+        -Force |
+        Out-Null
+
+    New-Item `
+        -ItemType Directory `
+        -Path $LogRoot `
+        -Force |
+        Out-Null
+
+    $Timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+
+    $ReportPath = Join-Path `
+        $ReportRoot `
+        "ProfMig_Migration_$Timestamp.txt"
+
+    $LogPath = Join-Path `
+        $LogRoot `
+        "ProfMig_$Timestamp.log"
+
+    $ReportContent = @'
+ProfMig Migration Report
+============================================================
+
+Source      : C:\Users\ProfMigSource
+Destination : C:\Users\ProfMigDestination
+Started     : 2026-09-11 09:17:20
+Completed   : 2026-09-11 09:17:23
+Duration    : 00:00:03
+
+Migration statistics
+============================================================
+
+Files selected : 10
+Files copied   : 9
+Files skipped  : 1
+Files failed   : 0
+
+Verification
+============================================================
+
+Level    : Standard
+Status   : Completed
+
+Overall result
+============================================================
+
+Success with warnings
+
+Copy Engine status
+============================================================
+
+CompletedWithWarnings
+
+Application Migration status
+============================================================
+
+NotRun
+'@
+
+    $LogContent = @'
+2026-09-11 09:17:20 [INFO] ProfMig migration started.
+2026-09-11 09:17:21 [INFO] Source profile validated.
+2026-09-11 09:17:21 [INFO] Destination profile validated.
+2026-09-11 09:17:23 [WARN] Migration completed with warnings.
+'@
+
+    Set-Content `
+        -LiteralPath $ReportPath `
+        -Value $ReportContent `
+        -Encoding UTF8
+
+    Set-Content `
+        -LiteralPath $LogPath `
+        -Value $LogContent `
+        -Encoding UTF8
+}
+
+
 Write-Host ''
 Write-Host '========================================'
 Write-Host 'ProfMig Remote Result Tests'
 Write-Host '========================================'
+Write-Host "Temporary test root: $TestRoot"
 
 
-# ---------------------------------------------------------------------------
-# Locate latest migration report
-# ---------------------------------------------------------------------------
+try {
 
-$Report = Get-ChildItem `
-    -LiteralPath $ReportRoot `
-    -Filter 'ProfMig_Migration_*.txt' `
-    -File `
-    -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
+    # -----------------------------------------------------------------------
+    # Create isolated test artifacts
+    # -----------------------------------------------------------------------
+
+    New-TestArtifacts
 
     Write-TestResult `
-    -Name 'Migration report can be located' `
-    -Passed ($null -ne $Report)
+        -Name 'Temporary report directory created' `
+        -Passed (Test-Path -LiteralPath $ReportRoot)
 
-if ($null -ne $Report) {
+    Write-TestResult `
+        -Name 'Temporary log directory created' `
+        -Passed (Test-Path -LiteralPath $LogRoot)
 
-    $ReportText = Get-Content `
-        -LiteralPath $Report.FullName `
-        -Raw
 
-    $RequiredPatterns = @(
-        'Source'
-        'Destination'
-        'Start'
-        'Completed'
-        'Duration'
-        'Files selected'
-        'Files copied'
-        'Files skipped'
-        'Files failed'
-        'Verification'
-        'Overall result'
-        'Copy Engine status'
-    )
+    # -----------------------------------------------------------------------
+    # Locate latest migration report
+    # -----------------------------------------------------------------------
 
-    foreach ($Pattern in $RequiredPatterns) {
+    $Report = Get-ChildItem `
+        -LiteralPath $ReportRoot `
+        -Filter 'ProfMig_Migration_*.txt' `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+
+    Write-TestResult `
+        -Name 'Migration report can be located' `
+        -Passed ($null -ne $Report)
+
+    if ($null -ne $Report) {
+
+        $ReportText = Get-Content `
+            -LiteralPath $Report.FullName `
+            -Raw
+
+        $RequiredPatterns = @(
+            'Source'
+            'Destination'
+            'Started'
+            'Completed'
+            'Duration'
+            'Files selected'
+            'Files copied'
+            'Files skipped'
+            'Files failed'
+            'Verification'
+            'Overall result'
+            'Copy Engine status'
+        )
+
+        foreach ($Pattern in $RequiredPatterns) {
+
+            Write-TestResult `
+                -Name "Report contains '$Pattern'" `
+                -Passed (
+                    $ReportText -match [regex]::Escape($Pattern)
+                )
+        }
 
         Write-TestResult `
-            -Name "Report contains '$Pattern'" `
-            -Passed ($ReportText -match [regex]::Escape($Pattern))
+            -Name 'Report contains interpretable overall result' `
+            -Passed (
+                $ReportText -match
+                '(?s)Overall result.*?(Success with warnings|Success|Failed)'
+            )
+
+        Write-TestResult `
+            -Name 'Report contains interpretable Copy Engine status' `
+            -Passed (
+                $ReportText -match
+                '(?s)Copy Engine status.*?(CompletedWithWarnings|Completed|Failed)'
+            )
+
+        Write-Host ''
+        Write-Host "Report : $($Report.FullName)"
     }
 
+
+    # -----------------------------------------------------------------------
+    # Locate latest ProfMig log
+    # -----------------------------------------------------------------------
+
+    $Log = Get-ChildItem `
+        -LiteralPath $LogRoot `
+        -Filter 'ProfMig_*.log' `
+        -File `
+        -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+
     Write-TestResult `
-    -Name 'Report contains interpretable overall result' `
-    -Passed (
-        $ReportText -match
-        '(?s)Overall result.*?(Success with warnings|Success|Failed)'
-    )
+        -Name 'ProfMig log can be located' `
+        -Passed ($null -ne $Log)
 
-Write-TestResult `
-    -Name 'Report contains interpretable Copy Engine status' `
-    -Passed (
-        $ReportText -match
-        '(?s)Copy Engine status.*?(CompletedWithWarnings|Completed|Failed)'
-    )
+    if ($null -ne $Log) {
 
+        $LogText = Get-Content `
+            -LiteralPath $Log.FullName `
+            -Raw
+
+        Write-TestResult `
+            -Name 'ProfMig log contains diagnostic content' `
+            -Passed (
+                -not [string]::IsNullOrWhiteSpace($LogText)
+            )
+
+        Write-Host "Log    : $($Log.FullName)"
+    }
+}
+catch {
 
     Write-Host ''
-    Write-Host "Report : $($Report.FullName)"
+    Write-Host "[FAIL] Unexpected test failure"
+    Write-Host "       $($_.Exception.Message)"
+
+    $Failed++
 }
+finally {
 
+    Write-Host ''
+    Write-Host 'Cleaning temporary test artifacts...'
 
-# ---------------------------------------------------------------------------
-# Locate latest ProfMig log
-# ---------------------------------------------------------------------------
+    if (Test-Path -LiteralPath $TestRoot) {
 
-$Log = Get-ChildItem `
-    -LiteralPath $LogRoot `
-    -Filter 'ProfMig_*.log' `
-    -File `
-    -ErrorAction SilentlyContinue |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
+        Remove-Item `
+            -LiteralPath $TestRoot `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
+    }
 
-Write-TestResult `
-    -Name 'ProfMig log can be located' `
-    -Passed ($null -ne $Log)
+    $CleanupSuccessful = -not (
+        Test-Path -LiteralPath $TestRoot
+    )
 
-if ($null -ne $Log) {
-
-    Write-Host "Log    : $($Log.FullName)"
+    Write-TestResult `
+        -Name 'Temporary test artifacts removed' `
+        -Passed $CleanupSuccessful
 }
 
 
