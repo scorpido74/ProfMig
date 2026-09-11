@@ -15,7 +15,7 @@
 
 [CmdletBinding()]
 param (
-    [string]$OutputPath = (Join-Path $PSScriptRoot '..\dist\ProfMig')
+    [string]$OutputPath
 )
 
 Set-StrictMode -Version Latest
@@ -23,6 +23,11 @@ $ErrorActionPreference = 'Stop'
 
 $RepositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $SourceRoot = Join-Path $RepositoryRoot 'src'
+
+if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+    $OutputPath = Join-Path $RepositoryRoot 'dist\ProfMig'
+}
+
 $PackageRoot = [System.IO.Path]::GetFullPath($OutputPath)
 
 $DeploymentScriptPath = Join-Path `
