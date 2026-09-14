@@ -6,6 +6,9 @@
     Verifies that invalid unattended command-line combinations are rejected
     before a migration can start and that ProfMig returns predictable process
     exit codes.
+
+    Silent-mode tests are executed using non-interactive PowerShell to validate
+    unattended execution for remote management scenarios.
 #>
 
 Set-StrictMode -Version Latest
@@ -33,6 +36,7 @@ function Invoke-ProfMigCliTest {
 
     & powershell.exe `
         -NoProfile `
+        -NonInteractive `
         -ExecutionPolicy Bypass `
         -File $ProfMigPath `
         @Arguments *> $null
@@ -69,6 +73,10 @@ Write-Host 'ProfMig Command-Line Tests'
 Write-Host '========================================'
 
 
+# ---------------------------------------------------------------------------
+# Test 1 - Silent mode requires profile identifiers
+# ---------------------------------------------------------------------------
+
 Invoke-ProfMigCliTest `
     -Name 'Silent mode without profile identifiers' `
     -Arguments @(
@@ -76,6 +84,10 @@ Invoke-ProfMigCliTest `
     ) `
     -ExpectedExitCode 3
 
+
+# ---------------------------------------------------------------------------
+# Test 2 - SID mode requires source and destination
+# ---------------------------------------------------------------------------
 
 Invoke-ProfMigCliTest `
     -Name 'Silent mode with incomplete SID parameters' `
@@ -86,6 +98,24 @@ Invoke-ProfMigCliTest `
     ) `
     -ExpectedExitCode 3
 
+
+# ---------------------------------------------------------------------------
+# Test 3 - Profile-path mode requires source and destination
+# ---------------------------------------------------------------------------
+
+Invoke-ProfMigCliTest `
+    -Name 'Silent mode with incomplete profile-path parameters' `
+    -Arguments @(
+        '-Silent'
+        '-SourceProfilePath'
+        'C:\Users\Test'
+    ) `
+    -ExpectedExitCode 3
+
+
+# ---------------------------------------------------------------------------
+# Test 4 - SID and profile-path modes cannot be mixed
+# ---------------------------------------------------------------------------
 
 Invoke-ProfMigCliTest `
     -Name 'Silent mode with mixed profile identifiers' `
@@ -101,6 +131,28 @@ Invoke-ProfMigCliTest `
     -ExpectedExitCode 3
 
 
+# ---------------------------------------------------------------------------
+# Test 5 - Profile-path mode cannot contain SID identifiers
+# ---------------------------------------------------------------------------
+
+Invoke-ProfMigCliTest `
+    -Name 'Silent mode with mixed path and SID identifiers' `
+    -Arguments @(
+        '-Silent'
+        '-SourceProfilePath'
+        'C:\Users\Test'
+        '-DestinationProfilePath'
+        'C:\Users\Test2'
+        '-DestinationSid'
+        'S-1-5-21-2000'
+    ) `
+    -ExpectedExitCode 3
+
+
+# ---------------------------------------------------------------------------
+# Test 6 - Unknown profile SIDs are rejected
+# ---------------------------------------------------------------------------
+
 Invoke-ProfMigCliTest `
     -Name 'Silent mode with unknown profile SID' `
     -Arguments @(
@@ -112,6 +164,26 @@ Invoke-ProfMigCliTest `
     ) `
     -ExpectedExitCode 4
 
+
+# ---------------------------------------------------------------------------
+# Test 7 - Unknown profile paths are rejected
+# ---------------------------------------------------------------------------
+
+Invoke-ProfMigCliTest `
+    -Name 'Silent mode with unknown profile paths' `
+    -Arguments @(
+        '-Silent'
+        '-SourceProfilePath'
+        'C:\ProfMig-Does-Not-Exist-Source'
+        '-DestinationProfilePath'
+        'C:\ProfMig-Does-Not-Exist-Destination'
+    ) `
+    -ExpectedExitCode 4
+
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
 
 Write-Host ''
 Write-Host '========================================'
