@@ -6,6 +6,134 @@ ProfMig follows semantic versioning for published releases.
 
 ---
 
+## [v0.5.0] - 2026-09-14
+
+### Added
+
+#### Deployment and packaging
+
+* Added standalone ProfMig runtime packaging.
+* Added deployment and uninstall tooling.
+* Added package build metadata.
+* Added support for persistent Logs, Reports and Backup directories.
+* Added predictable installation, upgrade and uninstall behaviour.
+* Added Microsoft Intune Win32 package generation.
+* Added version-specific Intune detection script generation.
+* Added Intune detection of incomplete runtime installations.
+
+#### Command-line and automation
+
+* Added command-line and silent migration mode.
+* Added source and destination profile selection through command-line parameters.
+* Added migration profile selection through command-line parameters.
+* Added external configuration file support for unattended migration.
+* Added predictable process exit codes for deployment and management platforms.
+* Added unattended launcher support with argument and exit-code propagation.
+
+#### Migration profiles and configuration
+
+* Added configurable migration profiles.
+* Added `Standard` migration profile.
+* Added `Minimal` migration profile.
+* Added configurable default migration profile selection.
+* Added explicit command-line migration profile precedence over the configured default.
+* Added configuration schema validation.
+* Added validation of unsupported configuration values.
+
+#### Remote and RMM execution
+
+* Added vendor-neutral remote execution wrapper.
+* Added support for LocalSystem execution.
+* Added support for administrator and remote-management execution contexts.
+* Added native 64-bit PowerShell resolution from 32-bit management processes.
+* Added working-directory-independent remote execution.
+* Added remote exit-code propagation.
+* Added persistent remote logging and reporting.
+* Added remote result interpretation and validation guidance.
+
+#### Code signing and release integrity
+
+* Added Authenticode signing support for ProfMig PowerShell runtime files.
+* Added support for trusted code-signing certificates with accessible private keys.
+* Added SHA-256 package manifest generation.
+* Added Authenticode signature validation tooling.
+* Added SHA-256 package integrity validation tooling.
+* Added detection of modified signed scripts.
+* Added detection of modified, missing and unexpected package files.
+
+#### Validation
+
+* Added central Milestone 5 automated validation runner.
+* Added Milestone 5 validation matrix.
+* Added standalone package end-to-end validation.
+* Added real silent migration validation.
+* Added external configuration and default-profile validation.
+* Added LocalSystem migration validation.
+* Added remote/RMM migration validation.
+* Added local Intune deployment lifecycle validation.
+* Added signed package and tamper-detection validation.
+* Added final Milestone 5 regression validation.
+
+### Changed
+
+* Changed ProfMig version from `0.2.0` to `0.5.0`.
+* Improved launcher behaviour for unattended execution.
+* Improved migration profile resolution to use configured default profiles.
+* Improved Intune detection to validate the runtime entry point in addition to package metadata.
+* Improved deployment architecture to keep management-platform-specific behaviour outside the ProfMig core.
+* Improved release integrity through complementary Authenticode and SHA-256 validation.
+* Expanded automated regression coverage for deployment, remote execution, Intune detection and configuration handling.
+
+### Fixed
+
+* Fixed `Start-ProfMig.bat` not forwarding command-line arguments.
+* Fixed `Start-ProfMig.bat` always pausing after execution.
+* Fixed launcher exit-code propagation during unattended execution.
+* Fixed configured `Migration.DefaultProfile` being ignored when `-MigrationProfile` was not supplied.
+* Fixed migration profile precedence so explicit command-line selection overrides the configured default.
+* Fixed Intune detection incorrectly accepting an incomplete installation when version metadata remained but `src\ProfMig.ps1` was missing.
+
+### Security
+
+* Added Authenticode signing for executable PowerShell content.
+* Added SHA-256 integrity validation for the complete runtime package.
+* Added detection of executable-code tampering.
+* Added integrity detection for non-executable package content such as configuration files.
+* Added release integrity regression tests.
+* Preserved existing credential-store exclusions and source ACL security controls through Milestone 3 regression validation.
+
+### Validation
+
+ProfMig v0.5.0 Milestone 5 technical validation completed successfully.
+
+Final automated results:
+
+* Milestone 5 suites: **13 passed, 0 failed**
+* Milestone 3 regression tests: **47 passed, 0 failed**
+* Versioning tests: **33 passed, 0 failed**
+* Deployment tests: **33 passed, 0 failed**
+* Remote configuration tests: **5 passed, 0 failed**
+* Intune detection tests: **6 passed, 0 failed**
+* Remote wrapper tests: **7 passed, 0 failed**
+* Code signing and integrity tests: **6 passed, 0 failed**
+
+End-to-end validation completed for:
+
+* standalone runtime packaging;
+* silent profile migration;
+* external configuration and migration-profile selection;
+* LocalSystem execution;
+* remote/RMM execution;
+* local Intune package lifecycle;
+* Authenticode-signed package validation;
+* SHA-256 package integrity;
+* executable and non-executable tamper detection;
+* final automated regression.
+
+Actual Microsoft Intune Win32 deployment to a managed test device remains pending as an environment-dependent integration validation.
+
+---
+
 ## [v0.2.0] - 2026-08-23
 
 ### Added

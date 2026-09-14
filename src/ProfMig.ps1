@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     ProfMig main application entry point.
 
@@ -481,11 +481,26 @@ try {
         # Resolve migration configuration
         # ---------------------------------------------------------------------
 
-        $MigrationConfiguration = $Config
+                $MigrationConfiguration = $Config
+        $EffectiveMigrationProfile = $MigrationProfile
+        $MigrationProfileSource = 'CommandLine'
 
-        if (-not [string]::IsNullOrWhiteSpace($MigrationProfile)) {
+        if (
+            [string]::IsNullOrWhiteSpace($EffectiveMigrationProfile) -and
+            $Config.Contains('Migration') -and
+            $null -ne $Config.Migration -and
+            $Config.Migration.Contains('DefaultProfile') -and
+            -not [string]::IsNullOrWhiteSpace(
+                [string]$Config.Migration.DefaultProfile
+            )
+        ) {
+            $EffectiveMigrationProfile = [string]$Config.Migration.DefaultProfile
+            $MigrationProfileSource = 'Configuration'
+        }
 
-            $MigrationProfilePath = $MigrationProfile
+        if (-not [string]::IsNullOrWhiteSpace($EffectiveMigrationProfile)) {
+
+            $MigrationProfilePath = $EffectiveMigrationProfile
 
             if (-not [System.IO.Path]::IsPathRooted($MigrationProfilePath)) {
 
@@ -523,15 +538,25 @@ try {
                 -Configuration $Config `
                 -Profile $LoadedMigrationProfile
 
-            Write-Info (
-                'Using migration profile: ' +
-                $MigrationConfiguration.MigrationProfile.Name
-            )
+            if ($MigrationProfileSource -eq 'Configuration') {
+
+                Write-Info (
+                    'Using default migration profile from configuration: ' +
+                    $MigrationConfiguration.MigrationProfile.Name
+                )
+            }
+            else {
+
+                Write-Info (
+                    'Using migration profile: ' +
+                    $MigrationConfiguration.MigrationProfile.Name
+                )
+            }
         }
         else {
 
             Write-Info (
-                'No migration profile specified. ' +
+                'No migration profile specified and no default profile configured. ' +
                 'Using standard ProfMig configuration.'
             )
         }
