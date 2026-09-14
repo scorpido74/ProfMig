@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Tests ProfMig configuration deployment for remote execution.
 
@@ -183,7 +183,100 @@ try {
             $InvalidConfig
         ) `
         -ExpectedExitCode 3
-}
+    # -----------------------------------------------------------------------
+    # Test 4 - Default migration profile is resolved from configuration
+    #
+    # When -MigrationProfile is omitted, ProfMig must use
+    # Migration.DefaultProfile from the loaded configuration.
+    # -----------------------------------------------------------------------
+
+    $ProfMigSource = Get-Content `
+        -LiteralPath $ProfMigPath `
+        -Raw
+
+    $DefaultProfileResolutionPresent = (
+        $ProfMigSource -match 'DefaultProfile' -and
+        $ProfMigSource -match '\$Config\.Migration\.DefaultProfile'
+    )
+
+    if ($DefaultProfileResolutionPresent) {
+
+        Write-Host (
+            '[PASS] {0}' -f
+            'Default migration profile resolved from configuration'
+        )
+
+        $Passed++
+    }
+    else {
+
+        Write-Host (
+            '[FAIL] {0}' -f
+            'Default migration profile resolved from configuration'
+        )
+
+        $Failed++
+    }
+        # -----------------------------------------------------------------------
+        # Test 5 - Explicit migration profile takes precedence over DefaultProfile
+        #
+        # An explicitly supplied -MigrationProfile must remain authoritative.
+        # DefaultProfile may only be selected when no explicit profile was given.
+        # -----------------------------------------------------------------------
+
+        $ExplicitProfileAssignment = $ProfMigSource.IndexOf(
+            '$EffectiveMigrationProfile = $MigrationProfile'
+        )
+
+        $DefaultProfileFallback = $ProfMigSource.IndexOf(
+            '[string]::IsNullOrWhiteSpace($EffectiveMigrationProfile)'
+        )
+
+        $DefaultProfileAssignment = $ProfMigSource.IndexOf(
+            '$EffectiveMigrationProfile = [string]$Config.Migration.DefaultProfile'
+        )
+
+        $ExplicitProfilePrecedencePresent = (
+            $ExplicitProfileAssignment -ge 0 -and
+            $DefaultProfileFallback -gt $ExplicitProfileAssignment -and
+            $DefaultProfileAssignment -gt $DefaultProfileFallback
+        )
+
+        if ($ExplicitProfilePrecedencePresent) {
+
+            Write-Host (
+                '[PASS] {0}' -f
+                'Explicit migration profile takes precedence over default profile'
+            )
+
+            $Passed++
+        }
+        else {
+
+            Write-Host (
+                '[FAIL] {0}' -f
+                'Explicit migration profile takes precedence over default profile'
+            )
+
+            Write-Host (
+                '       Explicit assignment position : {0}' -f
+                $ExplicitProfileAssignment
+            )
+
+            Write-Host (
+                '       Default fallback position     : {0}' -f
+                $DefaultProfileFallback
+            )
+
+            Write-Host (
+                '       Default assignment position   : {0}' -f
+                $DefaultProfileAssignment
+            )
+
+            $Failed++
+        }
+
+    }
 finally {
 
     Remove-Item `

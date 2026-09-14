@@ -12,6 +12,7 @@
     Detection succeeds only when:
     - The ProfMig installation directory exists.
     - ProfMig.Build.psd1 exists.
+    - The ProfMig runtime entry point exists.
     - The installed metadata identifies ProfMig.
     - The installed version exactly matches ExpectedVersion.
 
@@ -46,16 +47,24 @@ try {
         exit 1
     }
 
-    $MetadataPath = Join-Path `
-        $InstallPath `
-        'ProfMig.Build.psd1'
+   $MetadataPath = Join-Path `
+    $InstallPath `
+    'ProfMig.Build.psd1'
 
-    if (-not (Test-Path -LiteralPath $MetadataPath -PathType Leaf)) {
-        exit 1
-    }
+if (-not (Test-Path -LiteralPath $MetadataPath -PathType Leaf)) {
+    exit 1
+}
 
-    $Metadata = Import-PowerShellDataFile `
-        -LiteralPath $MetadataPath
+$RuntimePath = Join-Path `
+    $InstallPath `
+    'src\ProfMig.ps1'
+
+if (-not (Test-Path -LiteralPath $RuntimePath -PathType Leaf)) {
+    exit 1
+}
+
+$Metadata = Import-PowerShellDataFile `
+    -LiteralPath $MetadataPath
 
     if (
         -not $Metadata.ContainsKey('Name') -or

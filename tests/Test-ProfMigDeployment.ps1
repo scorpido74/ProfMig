@@ -725,6 +725,52 @@ try {
         -Passed ($SilentResult.ExitCode -eq 3) `
         -Details $SilentResult.Text
 
+    # Validate the packaged launcher separately from direct ProfMig.ps1
+    # execution. The launcher must forward command-line arguments and
+    # preserve the ProfMig process exit code for automation scenarios.
+
+    $LauncherPath = Join-Path `
+        $RuntimeInstall `
+        'Start-ProfMig.bat'
+
+    $LauncherVersionOutput = & cmd.exe `
+        /d `
+        /c `
+        "`"$LauncherPath`" -Version" 2>&1
+
+    $LauncherVersionExitCode = $LASTEXITCODE
+    $LauncherVersionText = (
+        $LauncherVersionOutput |
+            Out-String
+    ).Trim()
+
+    Write-TestResult `
+        -Name 'Deployed launcher forwards command-line arguments' `
+        -Passed (
+            ($LauncherVersionExitCode -eq 0) -and
+            ($LauncherVersionText -match (
+                'ProfMig\s+' +
+                [regex]::Escape($ExpectedRuntimeVersion)
+            ))
+        ) `
+        -Details $LauncherVersionText
+
+    $LauncherSilentOutput = & cmd.exe `
+        /d `
+        /c `
+        "`"$LauncherPath`" -Silent" 2>&1
+
+    $LauncherSilentExitCode = $LASTEXITCODE
+    $LauncherSilentText = (
+        $LauncherSilentOutput |
+            Out-String
+    ).Trim()
+
+    Write-TestResult `
+        -Name 'Deployed launcher preserves ProfMig exit codes' `
+        -Passed ($LauncherSilentExitCode -eq 3) `
+        -Details $LauncherSilentText
+
     # -------------------------------------------------------------------------
     # Summary
     # -------------------------------------------------------------------------

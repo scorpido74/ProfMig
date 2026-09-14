@@ -12,6 +12,7 @@
     Covered scenarios:
     - Missing installation
     - Correct installed version
+    - Missing runtime entry point
     - Incorrect installed version
     - Missing build metadata
     - Invalid product metadata
@@ -82,7 +83,27 @@ function Set-TestMetadata {
     New-Item `
         -ItemType Directory `
         -Path $TestRoot `
-        -Force | Out-Null
+        -Force |
+        Out-Null
+
+    $RuntimeDirectory = Join-Path `
+        $TestRoot `
+        'src'
+
+    New-Item `
+        -ItemType Directory `
+        -Path $RuntimeDirectory `
+        -Force |
+        Out-Null
+
+    $RuntimePath = Join-Path `
+        $RuntimeDirectory `
+        'ProfMig.ps1'
+
+    Set-Content `
+        -LiteralPath $RuntimePath `
+        -Value '# ProfMig test runtime' `
+        -Encoding UTF8
 
     $Metadata = @"
 @{
@@ -162,8 +183,41 @@ try {
 
 
     # -------------------------------------------------------------------------
+    # Missing runtime entry point
+    # -------------------------------------------------------------------------
+
+    Set-TestMetadata `
+        -Name 'ProfMig' `
+        -Version '0.2.0'
+
+    $RuntimePath = Join-Path `
+        $TestRoot `
+        'src\ProfMig.ps1'
+
+    if (-not (Test-Path -LiteralPath $RuntimePath -PathType Leaf)) {
+        throw "Test setup failed: runtime entry point was not created: $RuntimePath"
+    }
+
+    Remove-Item `
+        -LiteralPath $RuntimePath `
+        -Force
+
+    $Result = Invoke-DetectionTest `
+        -ExpectedVersion '0.2.0'
+
+    Write-TestResult `
+        -Name 'Installation without runtime entry point is not detected' `
+        -Passed ($Result.ExitCode -eq 1) `
+        -Details ($Result.Output -join ' ')
+
+
+    # -------------------------------------------------------------------------
     # Incorrect version
     # -------------------------------------------------------------------------
+
+    Set-TestMetadata `
+        -Name 'ProfMig' `
+        -Version '0.2.0'
 
     $Result = Invoke-DetectionTest `
         -ExpectedVersion '0.3.0'
@@ -178,8 +232,16 @@ try {
     # Missing metadata
     # -------------------------------------------------------------------------
 
+    Set-TestMetadata `
+        -Name 'ProfMig' `
+        -Version '0.2.0'
+
+    $MetadataPath = Join-Path `
+        $TestRoot `
+        'ProfMig.Build.psd1'
+
     Remove-Item `
-        -LiteralPath (Join-Path $TestRoot 'ProfMig.Build.psd1') `
+        -LiteralPath $MetadataPath `
         -Force
 
     $Result = Invoke-DetectionTest `
