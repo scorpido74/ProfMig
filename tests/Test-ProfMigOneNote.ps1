@@ -321,6 +321,73 @@ try {
 
 
     # ========================================================================
+    # Test 8 - Migration plan
+    # ========================================================================
+
+    $migrationPlan = Get-ProfMigOneNoteMigrationPlan `
+        -ProfilePath $sourceProfile
+
+    Test-Condition `
+        -Name 'Migration plan detects OneNote data' `
+        -Condition (
+            $migrationPlan.Detected
+        )
+
+    Test-Condition `
+        -Name 'Migration plan contains one portable migration item' `
+        -Condition (
+            $migrationPlan.MigrateCount -eq 1
+        )
+
+    Test-Condition `
+        -Name 'Migration plan contains one backup preservation item' `
+        -Condition (
+            $migrationPlan.PreserveCount -eq 1
+        )
+
+    Test-Condition `
+        -Name 'Migration plan excludes one Office template' `
+        -Condition (
+            $migrationPlan.ExcludeCount -eq 1
+        )
+
+    Test-Condition `
+        -Name 'Migration plan requires review when cache contains data' `
+        -Condition (
+            $migrationPlan.RequiresReview
+        )
+
+    Test-Condition `
+        -Name 'Migration plan status is ReadyWithWarnings' `
+        -Condition (
+            $migrationPlan.Status -eq 'ReadyWithWarnings'
+        )
+
+    Test-Condition `
+        -Name 'Migration plan never overwrites destination data' `
+        -Condition (
+            $migrationPlan.OverwritePolicy -eq 'NeverOverwrite'
+        )
+
+    Test-Condition `
+        -Name 'Migration plan does not migrate OneNote cache' `
+        -Condition (
+            $migrationPlan.CachePolicy -eq 'ReviewOnly'
+        )
+
+    Test-Condition `
+        -Name 'Migration plan preserves OneNote backups' `
+        -Condition (
+            $migrationPlan.BackupPolicy -eq 'Preserve'
+        )
+
+    Test-Condition `
+        -Name 'Migration plan contains cache warning' `
+        -Condition (
+            $migrationPlan.Warnings.Count -eq 1
+        )
+
+    # ========================================================================
     # Test 8 - Empty profile
     # ========================================================================
 

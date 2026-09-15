@@ -429,6 +429,148 @@ function Get-ProfMigOneNoteCacheState {
     }
 }
 
+# ============================================================================
+# Get-ProfMigOneNoteMigrationPlan
+#
+# Builds a migration plan from OneNote discovery results.
+#
+# Policies:
+#
+# Portable
+#   Migrate local portable OneNote data.
+#
+# Backup
+#   Preserve recoverable OneNote backup data.
+#
+# Cache
+#   Review only. Cache contents are never automatically migrated.
+#
+# Template
+#   Exclude unrelated Office template artifacts.
+# ============================================================================
+
+function Get-ProfMigOneNoteMigrationPlan {
+
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$ProfilePath
+    )
+
+    $detection = Get-ProfMigOneNoteDetection `
+        -ProfilePath $ProfilePath
+
+    $migrateItems = @(
+        $detection.Files |
+            Where-Object {
+                $_.Action -eq 'Migrate'
+            }
+    )
+
+    $preserveItems = @(
+        $detection.Files |
+            Where-Object {
+                $_.Action -eq 'Preserve'
+            }
+    )
+
+    $reviewItems = @(
+        $detection.Files |
+            Where-Object {
+                $_.Action -eq 'Review'
+            }
+    )
+
+    $excludedItems = @(
+        $detection.Files |
+            Where-Object {
+                $_.Action -eq 'Exclude'
+            }
+    )
+
+    [Int64]$migrationBytes = 0
+    [Int64]$preservationBytes = 0
+
+    foreach ($item in $migrateItems) {
+        $migrationBytes += [Int64]$item.Size
+    }
+
+    foreach ($item in $preserveItems) {
+        $preservationBytes += [Int64]$item.Size
+    }
+
+    $warnings = New-Object `
+        'System.Collections.Generic.List[string]'
+
+    if ($detection.CacheState.RequiresReview) {
+
+        if (
+            -not [string]::IsNullOrWhiteSpace(
+                $detection.CacheState.Warning
+            )
+        ) {
+            $warnings.Add(
+                $detection.CacheState.Warning
+            )
+        }
+    }
+
+    $status = if (-not $detection.Detected) {
+        'NoData'
+    }
+    elseif (
+        $migrateItems.Count -eq 0 -and
+        $preserveItems.Count -eq 0
+    ) {
+        'ReviewOnly'
+    }
+    elseif ($detection.RequiresReview) {
+        'ReadyWithWarnings'
+    }
+    else {
+        'Ready'
+    }
+
+    [PSCustomObject]@{
+        Application       = 'Microsoft OneNote'
+        ApplicationId     = 'OneNote'
+        ProfilePath       = $ProfilePath
+
+        Detected          = $detection.Detected
+        Status            = $status
+
+        ItemsDetected     = $detection.TotalFiles
+
+        MigrateCount      = $migrateItems.Count
+        PreserveCount     = $preserveItems.Count
+        ReviewCount       = $reviewItems.Count
+        ExcludeCount      = $excludedItems.Count
+
+        MigrationBytes    = $migrationBytes
+        PreservationBytes = $preservationBytes
+        TotalCopyBytes    = (
+            $migrationBytes +
+            $preservationBytes
+        )
+
+        MigrateItems      = $migrateItems
+        PreserveItems     = $preserveItems
+        ReviewItems       = $reviewItems
+        ExcludedItems     = $excludedItems
+
+        CachePolicy       = 'ReviewOnly'
+        BackupPolicy      = 'Preserve'
+        CloudPolicy       = 'Resynchronize'
+        OverwritePolicy   = 'NeverOverwrite'
+
+        CacheState        = $detection.CacheState
+        RequiresReview    = $detection.RequiresReview
+        Warnings          = $warnings.ToArray()
+
+        Detection         = $detection
+    }
+}
 
 # ============================================================================
 # Get-ProfMigOneNoteDetection
@@ -614,4 +756,5 @@ Export-ModuleMember -Function @(
     'Get-ProfMigOneNoteFiles'
     'Get-ProfMigOneNoteCacheState'
     'Get-ProfMigOneNoteDetection'
+    'Get-ProfMigOneNoteMigrationPlan'
 )
