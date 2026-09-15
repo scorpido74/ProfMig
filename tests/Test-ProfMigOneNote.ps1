@@ -1,7 +1,11 @@
 # ============================================================================
 # Test-ProfMigOneNote.ps1
 #
-# Regression tests for Microsoft OneNote discovery and migration protection.
+# Regression tests for Microsoft OneNote discovery, migration protection,
+# migration planning and safe file copying.
+#
+# Synthetic OneNote files are used to validate ProfMig behavior only.
+# They are not intended to represent valid OneNote file contents.
 # ============================================================================
 
 $ErrorActionPreference = 'Stop'
@@ -50,8 +54,17 @@ $testRoot = Join-Path `
     ([System.IO.Path]::GetTempPath()) `
     ('ProfMig-OneNote-' + [Guid]::NewGuid().ToString('N'))
 
-$sourceProfile = Join-Path $testRoot 'Source'
-$emptyProfile  = Join-Path $testRoot 'Empty'
+$sourceProfile = Join-Path `
+    $testRoot `
+    'Source'
+
+$emptyProfile = Join-Path `
+    $testRoot `
+    'Empty'
+
+$destinationProfile = Join-Path `
+    $testRoot `
+    'Destination'
 
 New-Item `
     -ItemType Directory `
@@ -62,6 +75,12 @@ New-Item `
 New-Item `
     -ItemType Directory `
     -Path $emptyProfile `
+    -Force |
+    Out-Null
+
+New-Item `
+    -ItemType Directory `
+    -Path $destinationProfile `
     -Force |
     Out-Null
 
@@ -96,6 +115,7 @@ try {
             $localNotebookPath
         )
     ) {
+
         New-Item `
             -ItemType Directory `
             -Path $path `
@@ -107,38 +127,48 @@ try {
     # ========================================================================
     # Synthetic files
     #
-    # These files only test ProfMig discovery/classification logic.
-    # They are not intended to represent valid OneNote file contents.
+    # These files test ProfMig discovery, classification and copy behavior.
+    # They are not valid OneNote notebooks or sections.
     # ========================================================================
 
+    $backupFilePath = Join-Path `
+        $backupPath `
+        'Backup Section.one'
+
+    $portableFilePath = Join-Path `
+        $localNotebookPath `
+        'Local Section.one'
+
+    $templateFilePath = Join-Path `
+        $templatePath `
+        'Notebook Template.onetoc2'
+
+    $cacheFilePath = Join-Path `
+        $cachePath `
+        '00000000.bin'
+
+    $cacheHeaderPath = Join-Path `
+        $cachePath `
+        'header'
+
     Set-Content `
-        -LiteralPath (
-            Join-Path $backupPath 'Backup Section.one'
-        ) `
+        -LiteralPath $backupFilePath `
         -Value 'synthetic backup'
 
     Set-Content `
-        -LiteralPath (
-            Join-Path $localNotebookPath 'Local Section.one'
-        ) `
+        -LiteralPath $portableFilePath `
         -Value 'synthetic local notebook'
 
     Set-Content `
-        -LiteralPath (
-            Join-Path $templatePath 'Notebook Template.onetoc2'
-        ) `
+        -LiteralPath $templateFilePath `
         -Value 'synthetic template'
 
     Set-Content `
-        -LiteralPath (
-            Join-Path $cachePath '00000000.bin'
-        ) `
+        -LiteralPath $cacheFilePath `
         -Value 'synthetic cache'
 
     Set-Content `
-        -LiteralPath (
-            Join-Path $cachePath 'header'
-        ) `
+        -LiteralPath $cacheHeaderPath `
         -Value 'synthetic header'
 
 
@@ -387,8 +417,198 @@ try {
             $migrationPlan.Warnings.Count -eq 1
         )
 
+
     # ========================================================================
-    # Test 8 - Empty profile
+    # Test 9 - Safe portable file copy
+    # ========================================================================
+
+    $copyDestination = Join-Path `
+        $destinationProfile `
+        'Documents\OneNote Notebooks\Test Notebook\Local Section.one'
+
+    $copyResult = Copy-ProfMigOneNoteFile `
+        -SourcePath $portableFilePath `
+        -DestinationPath $copyDestination
+
+    Test-Condition `
+        -Name 'Portable OneNote file is copied successfully' `
+        -Condition (
+            $copyResult.Success -and
+            -not $copyResult.Skipped
+        )
+
+    Test-Condition `
+        -Name 'Copied OneNote file exists at destination' `
+        -Condition (
+            Test-Path `
+                -LiteralPath $copyDestination `
+                -PathType Leaf
+        )
+
+    $sourceCopyFile = Get-Item `
+        -LiteralPath $portableFilePath
+
+    $destinationCopyFile = Get-Item `
+        -LiteralPath $copyDestination
+
+    Test-Condition `
+        -Name 'Copied OneNote file size matches source' `
+        -Condition (
+            $destinationCopyFile.Length -eq
+            $sourceCopyFile.Length
+        )
+
+    Test-Condition `
+        -Name 'Copy result reports copied file size' `
+        -Condition (
+            $copyResult.SizeBytes -eq
+            $sourceCopyFile.Length
+        )
+
+
+    # ========================================================================
+    # Test 10 - Existing destination is never overwritten
+    # ========================================================================
+
+    $originalDestinationContent = Get-Content `
+        -LiteralPath $copyDestination `
+        -Raw
+
+    Set-Content `
+        -LiteralPath $portableFilePath `
+        -Value 'THIS MUST NOT OVERWRITE DESTINATION'
+
+    $noOverwriteResult = Copy-ProfMigOneNoteFile `
+        -SourcePath $portableFilePath `
+        -DestinationPath $copyDestination
+
+    $destinationContentAfterSecondCopy = Get-Content `
+        -LiteralPath $copyDestination `
+        -Raw
+
+    Test-Condition `
+        -Name 'Existing destination OneNote file is skipped' `
+        -Condition (
+            $noOverwriteResult.Success -and
+            $noOverwriteResult.Skipped
+        )
+
+    Test-Condition `
+        -Name 'Existing destination OneNote file is not overwritten' `
+        -Condition (
+            $destinationContentAfterSecondCopy -eq
+            $originalDestinationContent
+        )
+
+    Test-Condition `
+        -Name 'Skipped copy reports zero copied bytes' `
+        -Condition (
+            $noOverwriteResult.SizeBytes -eq 0
+        )
+
+
+    # ========================================================================
+    # Test 11 - Unsupported source type
+    # ========================================================================
+
+    $unsupportedSource = Join-Path `
+        $sourceProfile `
+        'Unsupported.bin'
+
+    $unsupportedDestination = Join-Path `
+        $destinationProfile `
+        'Unsupported.bin'
+
+    Set-Content `
+        -LiteralPath $unsupportedSource `
+        -Value 'unsupported file'
+
+    $unsupportedResult = Copy-ProfMigOneNoteFile `
+        -SourcePath $unsupportedSource `
+        -DestinationPath $unsupportedDestination
+
+    Test-Condition `
+        -Name 'Unsupported OneNote source type is rejected' `
+        -Condition (
+            -not $unsupportedResult.Success -and
+            -not $unsupportedResult.Skipped
+        )
+
+    Test-Condition `
+        -Name 'Unsupported source is not created at destination' `
+        -Condition (
+            -not (
+                Test-Path `
+                    -LiteralPath $unsupportedDestination `
+                    -PathType Leaf
+            )
+        )
+
+
+    # ========================================================================
+    # Test 12 - Missing source
+    # ========================================================================
+
+    $missingSource = Join-Path `
+        $sourceProfile `
+        'Missing.one'
+
+    $missingDestination = Join-Path `
+        $destinationProfile `
+        'Missing.one'
+
+    $missingCopyResult = Copy-ProfMigOneNoteFile `
+        -SourcePath $missingSource `
+        -DestinationPath $missingDestination
+
+    Test-Condition `
+        -Name 'Missing OneNote source file returns failure' `
+        -Condition (
+            -not $missingCopyResult.Success -and
+            -not $missingCopyResult.Skipped
+        )
+
+    Test-Condition `
+        -Name 'Missing OneNote source does not create destination file' `
+        -Condition (
+            -not (
+                Test-Path `
+                    -LiteralPath $missingDestination `
+                    -PathType Leaf
+            )
+        )
+
+
+    # ========================================================================
+    # Test 13 - Backup file can be safely preserved
+    # ========================================================================
+
+    $backupDestination = Join-Path `
+        $destinationProfile `
+        'Recovery\OneNote\Backup Section.one'
+
+    $backupCopyResult = Copy-ProfMigOneNoteFile `
+        -SourcePath $backupFilePath `
+        -DestinationPath $backupDestination
+
+    Test-Condition `
+        -Name 'OneNote backup file can be preserved safely' `
+        -Condition (
+            $backupCopyResult.Success -and
+            -not $backupCopyResult.Skipped
+        )
+
+    Test-Condition `
+        -Name 'Preserved OneNote backup exists at destination' `
+        -Condition (
+            Test-Path `
+                -LiteralPath $backupDestination `
+                -PathType Leaf
+        )
+
+
+    # ========================================================================
+    # Test 14 - Empty profile
     # ========================================================================
 
     $emptyDetection = Get-ProfMigOneNoteDetection `
@@ -408,7 +628,7 @@ try {
 
 
     # ========================================================================
-    # Test 9 - Missing profile
+    # Test 15 - Missing profile
     # ========================================================================
 
     $missingProfile = Join-Path `
