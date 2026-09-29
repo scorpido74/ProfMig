@@ -34,6 +34,17 @@
         }
     }
 
+    Backup = @{
+        OneDrive = @{
+            Enabled          = $true
+            FolderName       = 'OneDrive - Infinigate Holding GmbH'
+            BackupFolder     = 'ProfMig\Backup'
+            LocalStagingPath = 'C:\ProgramData\ProfMig\Backup'
+            Verification     = 'SHA256'
+            CleanupStaging   = $true
+        }
+    }
+
     Retry = @{
         Count        = 3
         DelaySeconds = 2
