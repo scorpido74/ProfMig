@@ -72,6 +72,9 @@ param (
     [string]$ReportPath,
 
     [Parameter()]
+    [switch]$BackupToOneDrive,
+
+    [Parameter()]
     [switch]$Version
 )
 
@@ -107,6 +110,7 @@ try {
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Logging.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.CopyEngine.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Verification.psm1') -Force
+    Import-Module (Join-Path $ModuleRoot 'ProfMig.Backup.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Reporting.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Inventory.psm1') -Force
     Import-Module (Join-Path $ModuleRoot 'ProfMig.Applications.psm1') -Force
@@ -447,6 +451,216 @@ try {
         )
     }
 
+
+
+    # =========================================================================
+    # OneDrive backup-only mode
+    # =========================================================================
+
+    if ($BackupToOneDrive) {
+
+        Write-Info 'Starting OneDrive backup-only mode.'
+
+        # ---------------------------------------------------------------------
+        # Validate backup configuration
+        # ---------------------------------------------------------------------
+
+        if ($null -eq $Config.Backup -or $null -eq $Config.Backup.OneDrive) {
+            throw (
+                New-ProfMigException `
+                    -Message 'OneDrive backup configuration is missing.' `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'OneDriveBackupConfigurationMissing'
+            )
+        }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [string]$Config.Backup.OneDrive.FolderName
+        )) {
+            throw (
+                New-ProfMigException `
+                    -Message 'OneDrive FolderName is missing in configuration.' `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'OneDriveFolderNameMissing'
+            )
+        }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [string]$Config.Backup.OneDrive.BackupFolder
+        )) {
+            throw (
+                New-ProfMigException `
+                    -Message 'OneDrive BackupFolder is missing in configuration.' `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'OneDriveBackupFolderMissing'
+            )
+        }
+
+        if ([string]::IsNullOrWhiteSpace(
+            [string]$Config.Backup.OneDrive.LocalStagingPath
+        )) {
+            throw (
+                New-ProfMigException `
+                    -Message 'OneDrive LocalStagingPath is missing in configuration.' `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'OneDriveStagingPathMissing'
+            )
+        }
+
+        if (
+            [string]$Config.Backup.OneDrive.Verification -ne 'SHA256'
+        ) {
+            throw (
+                New-ProfMigException `
+                    -Message 'Unsupported backup verification method. SHA256 is required.' `
+                    -Category 'ConfigurationError' `
+                    -Severity 'Critical' `
+                    -RecoveryAction 'Stop' `
+                    -Reason 'UnsupportedBackupVerification'
+            )
+        }
+
+        # ---------------------------------------------------------------------
+        # Detect interactive user and source profile
+        # ---------------------------------------------------------------------
+
+        $InteractiveUser = Get-ProfMigInteractiveUser
+
+        Write-Info (
+            "Interactive user detected: $InteractiveUser"
+        )
+
+        $BackupProfilePath = Get-ProfMigUserProfile `
+            -UserName $InteractiveUser
+
+        Write-Info (
+            "Backup source profile: $BackupProfilePath"
+        )
+
+        # ---------------------------------------------------------------------
+        # Detect OneDrive
+        # ---------------------------------------------------------------------
+
+        $OneDrivePath = Get-ProfMigOneDrivePath `
+            -ProfilePath $BackupProfilePath `
+            -FolderName $Config.Backup.OneDrive.FolderName
+
+        Write-Info (
+            "OneDrive path detected: $OneDrivePath"
+        )
+
+        # ---------------------------------------------------------------------
+        # Create matching staging and destination paths
+        # ---------------------------------------------------------------------
+
+        $BackupTimestamp = Get-Date
+
+        $StagingPath = New-ProfMigBackupStaging `
+            -RootPath $Config.Backup.OneDrive.LocalStagingPath `
+            -ComputerName $env:COMPUTERNAME `
+            -Timestamp $BackupTimestamp
+
+        $OneDriveBackupPath = Get-ProfMigOneDriveBackupPath `
+            -OneDrivePath $OneDrivePath `
+            -BackupFolder $Config.Backup.OneDrive.BackupFolder `
+            -ComputerName $env:COMPUTERNAME `
+            -Timestamp $BackupTimestamp
+
+        Write-Info (
+            "Backup staging path: $StagingPath"
+        )
+
+        Write-Info (
+            "OneDrive backup destination: $OneDriveBackupPath"
+        )
+
+        # ---------------------------------------------------------------------
+        # Copy configured profile components into staging
+        # ---------------------------------------------------------------------
+
+        foreach ($Component in $Config.Migration.Components) {
+
+            $SourceComponent = Join-Path `
+                -Path $BackupProfilePath `
+                -ChildPath $Component
+
+            if (-not (
+                Test-Path `
+                    -LiteralPath $SourceComponent `
+                    -PathType Container
+            )) {
+                Write-Info (
+                    "Backup component not found, skipping: $Component"
+                )
+
+                continue
+            }
+
+            $DestinationComponent = Join-Path `
+                -Path $StagingPath `
+                -ChildPath $Component
+
+            Write-Info (
+                "Backing up component: $Component"
+            )
+
+            Copy-ProfMigBackupContent `
+                -SourcePath $SourceComponent `
+                -DestinationPath $DestinationComponent |
+                Out-Null
+        }
+
+        # ---------------------------------------------------------------------
+        # Transfer staging to OneDrive and verify SHA256
+        # ---------------------------------------------------------------------
+
+        $TransferParameters = @{
+            SourcePath      = $StagingPath
+            DestinationPath = $OneDriveBackupPath
+        }
+
+        if ([bool]$Config.Backup.OneDrive.CleanupStaging) {
+            $TransferParameters['CleanupSource'] = $true
+        }
+
+        $BackupResult = Invoke-ProfMigOneDriveBackupTransfer @TransferParameters
+
+        # ---------------------------------------------------------------------
+        # Successful completion
+        # ---------------------------------------------------------------------
+
+        Write-Success 'OneDrive backup completed successfully.'
+
+        Write-Info (
+            "Backup destination: $($BackupResult.DestinationPath)"
+        )
+
+        Write-Info (
+            "Verified files: $($BackupResult.FileCount)"
+        )
+
+        Write-Info (
+            "Verification method: $($BackupResult.Verification)"
+        )
+
+        $exitCode = Get-ProfMigExitCode -Result 'Success'
+
+        Write-Info (
+            "ProfMig backup-only exit code: $exitCode"
+        )
+
+        Stop-ProfMig
+
+        exit $exitCode
+    }
 
     # =========================================================================
     # Interactive mode
